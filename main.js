@@ -831,13 +831,13 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
     } else if (statusChar === 'I') {
       kind = 'idea';
       badge = '闪念';
-      body = body.replace(/(?:^|\s)#闪念\b/g, ' ').trim();
+      body = body.replace(/(?:^|\s)#闪念(?=\s|$)/g, ' ').trim();
     } else if (statusChar === 'i') {
-      if (/(?:^|\s)#要事\b/.test(body)) {
+      if (/(?:^|\s)#要事(?=\s|$)/.test(body)) {
         kind = 'important';
         badge = '要事';
-        body = body.replace(/(?:^|\s)#要事\b/g, ' ').trim();
-      } else if (/(?:^|\s)#进度\b/.test(body)) {
+        body = body.replace(/(?:^|\s)#要事(?=\s|$)/g, ' ').trim();
+      } else if (/(?:^|\s)#进度(?=\s|$)/.test(body)) {
         kind = 'progress';
         badge = '进度';
       } else {
@@ -2425,6 +2425,7 @@ module.exports = {
 
 const { formatDateYMD, getPeriodTitleByHour, pickDefaultJournalPeriod } = require('../utils/date');
 const { getBookmarksPlugin, buildBookmarkTree } = require('./bookmarks-adapter');
+const { getWeeklyNotePreset } = require('./periodic-notes-adapter');
 const { scanMarkdownTasks } = require('../parsers/markdown');
 const { parseDailyActiveStatus, parseDailyJournalTimeline } = require('../parsers/journal');
 const { parseExecutionTasksFromDaily } = require('../parsers/execution');
@@ -2483,7 +2484,6 @@ class VaultDataStore {
       ideaBatch: [],
       ideaPage: 0,
       activeStatus: emptyActiveStatus(),
-      calMode: 'month',
       calCursorYMD: todayStr,
       selectedDate: '',
       dailyFilesSet: new Set(),
@@ -2757,7 +2757,9 @@ class VaultDataStore {
 
     let projectsDirty = false;
     let logsDirty = false;
+    let weeklyDirty = false;
     let recentDirty = false;
+    const weeklyFolder = getWeeklyNotePreset(this.app).folder;
 
     const toReadProjects = new Map();
     const toReadLogs = new Map();
@@ -2776,6 +2778,9 @@ class VaultDataStore {
         const p = item.path;
         if (!p || !p.endsWith('.md')) continue;
         if (isRecentCandidatePath(p)) recentDirty = true;
+        if (weeklyFolder ? p.startsWith(`${weeklyFolder}/`) : !p.includes('/')) {
+          weeklyDirty = true;
+        }
 
         if (p.startsWith('04_Project/')) {
           if (item.removed) {
@@ -2869,6 +2874,8 @@ class VaultDataStore {
       dirty.sticky = true;
       dirty.calendar = true;
       dirty.tasks = true;
+    } else if (weeklyDirty) {
+      dirty.calendar = true;
     }
 
     if (recentDirty) {
@@ -2922,6 +2929,302 @@ module.exports = {
   emptyActiveStatus,
   extractDailyDate,
   isRecentCandidatePath,
+};
+
+  },
+  "./services/periodic-notes-adapter.js": function (require, module, exports) {
+'use strict';
+
+const { pad2, parseYMD, addDaysYMD, getIsoWeekInfo } = require('../utils/date');
+
+const DEFAULT_WEEKLY_PRESET = {
+  folder: '06_日志',
+  format: 'gggg[W]ww',
+  template: '02_模版/周志-xdb.md',
+};
+
+const WEEKDAY_OFFSETS = {
+  monday: 0,
+  tuesday: 1,
+  wednesday: 2,
+  thursday: 3,
+  friday: 4,
+  saturday: 5,
+  sunday: 6,
+};
+
+const CN_WEEKDAYS_FULL = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+const CN_WEEKDAYS_SHORT = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+/**
+ * 规范化 Vault 相对路径（纯 JS 实现，不依赖 Node path 模块）。
+ */
+function normalizeVaultPath(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+}
+
+/**
+ * 获取已启用的 Periodic Notes 插件实例；未安装或未启用时返回 null。
+ */
+function getPeriodicNotesPlugin(app) {
+  const plugins = app?.plugins;
+  if (!plugins) return null;
+  if (typeof plugins.getPlugin === 'function') {
+    return plugins.getPlugin('periodic-notes') || null;
+  }
+  const enabled = plugins.enabledPlugins;
+  if (enabled && typeof enabled.has === 'function' && enabled.size > 0 && !enabled.has('periodic-notes')) {
+    return null;
+  }
+  return plugins.plugins?.['periodic-notes'] || null;
+}
+
+/**
+ * 读取周志预设（Periodic Notes 优先，缺省或未启用时按字段回退至默认预设）。
+ */
+function getWeeklyNotePreset(app) {
+  const plugin = getPeriodicNotesPlugin(app);
+  const weekly = plugin?.settings?.weekly;
+  if (weekly && weekly.enabled !== false) {
+    const folderRaw = typeof weekly.folder === 'string' ? weekly.folder.trim() : '';
+    const formatRaw = typeof weekly.format === 'string' ? weekly.format.trim() : '';
+    const templateRaw = typeof weekly.template === 'string' ? weekly.template.trim() : '';
+    return {
+      folder: folderRaw ? normalizeVaultPath(folderRaw) : DEFAULT_WEEKLY_PRESET.folder,
+      format: formatRaw || DEFAULT_WEEKLY_PRESET.format,
+      template: templateRaw ? normalizeVaultPath(templateRaw) : DEFAULT_WEEKLY_PRESET.template,
+      source: 'periodic-notes',
+    };
+  }
+  return {
+    ...DEFAULT_WEEKLY_PRESET,
+    source: 'default',
+  };
+}
+
+function formatFallbackMoment(dateObj, pattern) {
+  const d = dateObj;
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const dow = d.getDay();
+  const hour24 = d.getHours();
+  const hour12 = hour24 % 12 || 12;
+  const minute = d.getMinutes();
+  const second = d.getSeconds();
+
+  const tokenRe = /(\[[^\]]*\])|(YYYY|YY|MMMM|MMM|MM|M|DD|D|dddd|ddd|HH|H|hh|h|mm|m|ss|s|A|a)/g;
+  return String(pattern || '').replace(tokenRe, (_full, literal, token) => {
+    if (literal !== undefined) return literal.slice(1, -1);
+    switch (token) {
+      case 'YYYY': return String(year);
+      case 'YY': return String(year).slice(-2);
+      case 'MMMM': return `${month}月`;
+      case 'MMM': return `${month}月`;
+      case 'MM': return pad2(month);
+      case 'M': return String(month);
+      case 'DD': return pad2(day);
+      case 'D': return String(day);
+      case 'dddd': return CN_WEEKDAYS_FULL[dow];
+      case 'ddd': return CN_WEEKDAYS_SHORT[dow];
+      case 'HH': return pad2(hour24);
+      case 'H': return String(hour24);
+      case 'hh': return pad2(hour12);
+      case 'h': return String(hour12);
+      case 'mm': return pad2(minute);
+      case 'm': return String(minute);
+      case 'ss': return pad2(second);
+      case 's': return String(second);
+      case 'A': return hour24 < 12 ? 'AM' : 'PM';
+      case 'a': return hour24 < 12 ? 'am' : 'pm';
+      default: return token;
+    }
+  });
+}
+
+/**
+ * 以 ISO 周口径（周一为首、周四定年）改写格式串中的 gggg/GGGG/ww/WW 后再格式化。
+ */
+function formatIsoAlignedMomentToken(dateInput, formatStr) {
+  const dt =
+    dateInput instanceof Date
+      ? new Date(dateInput.getTime())
+      : parseYMD(dateInput) || new Date(dateInput);
+  if (!dt || Number.isNaN(dt.getTime())) return '';
+
+  const info = getIsoWeekInfo(dt);
+  const rewritten = String(formatStr || '').replace(
+    /(\[[^\]]*\])|(GGGG|gggg|GG|gg|WW|ww|W|w)/g,
+    (full, literal, token) => {
+      if (literal !== undefined) return literal;
+      switch (token) {
+        case 'GGGG':
+        case 'gggg':
+          return `[${info.isoWeekYear}]`;
+        case 'GG':
+        case 'gg':
+          return `[${String(info.isoWeekYear).slice(-2)}]`;
+        case 'WW':
+        case 'ww':
+          return `[${pad2(info.weekNumber)}]`;
+        case 'W':
+        case 'w':
+          return `[${info.weekNumber}]`;
+        default:
+          return full;
+      }
+    }
+  );
+
+  if (typeof globalThis.moment === 'function') {
+    return globalThis.moment(dt).format(rewritten);
+  }
+  return formatFallbackMoment(dt, rewritten);
+}
+
+/**
+ * 根据周志预设与日期解析目标周志的元信息、标题与 Vault 路径。
+ */
+function resolveWeeklyNoteTarget(app, dateInput) {
+  const info = getIsoWeekInfo(dateInput);
+  const preset = getWeeklyNotePreset(app);
+  if (!info.weekStart) {
+    return { ...info, preset, title: '', filePath: '' };
+  }
+  const anchorThursday = parseYMD(addDaysYMD(info.weekStart, 3));
+  const rawFormatted = formatIsoAlignedMomentToken(anchorThursday, preset.format || DEFAULT_WEEKLY_PRESET.format);
+  const relNoExt = normalizeVaultPath(rawFormatted).replace(/\.md$/i, '') || info.isoWeekYearTitle;
+  const title = relNoExt.split('/').pop() || info.isoWeekYearTitle;
+  const folder = normalizeVaultPath(preset.folder);
+  const filePath = `${folder ? `${folder}/` : ''}${relNoExt}.md`;
+  return {
+    ...info,
+    preset,
+    title,
+    filePath,
+  };
+}
+
+function isVaultFile(file) {
+  return Boolean(file && !Array.isArray(file.children));
+}
+
+/**
+ * 解析周志模板文件（支持带/不带 .md 后缀及 linkpath 回退）。
+ */
+function resolveTemplateFile(app, templatePath) {
+  const norm = normalizeVaultPath(templatePath);
+  if (!norm || !app?.vault) return null;
+  const direct = app.vault.getAbstractFileByPath?.(norm);
+  if (isVaultFile(direct)) return direct;
+  if (!/\.md$/i.test(norm)) {
+    const withExt = app.vault.getAbstractFileByPath?.(`${norm}.md`);
+    if (isVaultFile(withExt)) return withExt;
+  }
+  const dest = app.metadataCache?.getFirstLinkpathDest?.(norm.replace(/\.md$/i, ''), '');
+  return isVaultFile(dest) ? dest : null;
+}
+
+function applyDateDelta(baseDate, delta, unit) {
+  const d = new Date(baseDate.getTime());
+  const n = Number(delta);
+  if (!Number.isFinite(n) || n === 0) return d;
+  if (unit === 'M') {
+    d.setMonth(d.getMonth() + n);
+    return d;
+  }
+  switch (String(unit || '').toLowerCase()) {
+    case 'y':
+      d.setFullYear(d.getFullYear() + n);
+      break;
+    case 'q':
+      d.setMonth(d.getMonth() + n * 3);
+      break;
+    case 'm':
+      d.setMinutes(d.getMinutes() + n);
+      break;
+    case 'w':
+      d.setDate(d.getDate() + n * 7);
+      break;
+    case 'd':
+      d.setDate(d.getDate() + n);
+      break;
+    case 'h':
+      d.setHours(d.getHours() + n);
+      break;
+    case 's':
+      d.setSeconds(d.getSeconds() + n);
+      break;
+    default:
+      break;
+  }
+  return d;
+}
+
+/**
+ * 混合渲染周志模板：同时支持 {{weekStart}}/{{weekEnd}}/{{title}} 与 Periodic Notes 原生变量。
+ */
+function renderWeeklyTemplate(templateText, targetInfo, nowDate = new Date()) {
+  const raw = String(templateText || '');
+  const now = nowDate instanceof Date ? nowDate : new Date(nowDate);
+  const mondayBase = parseYMD(targetInfo?.weekStart) || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  mondayBase.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+
+  const defaultWeekFormat = targetInfo?.preset?.format || DEFAULT_WEEKLY_PRESET.format;
+  const title = targetInfo?.title || targetInfo?.weekTitle || '';
+  const weekStart = targetInfo?.weekStart || '';
+  const weekEnd = targetInfo?.weekEnd || '';
+
+  return raw
+    .replace(/\{\{\s*weekStart\s*\}\}/g, weekStart)
+    .replace(/\{\{\s*weekEnd\s*\}\}/g, weekEnd)
+    .replace(/\{\{\s*title\s*\}\}/gi, title)
+    .replace(/\{\{\s*time\s*\}\}/gi, `${pad2(now.getHours())}:${pad2(now.getMinutes())}`)
+    .replace(
+      /\{\{\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*:(.*?)\}\}/gi,
+      (_m, dayName, fmt) => {
+        const offset = WEEKDAY_OFFSETS[String(dayName).toLowerCase()] ?? 0;
+        const targetYmd = addDaysYMD(weekStart, offset);
+        const targetDt = parseYMD(targetYmd) || mondayBase;
+        return formatIsoAlignedMomentToken(targetDt, String(fmt || '').trim() || 'YYYY-MM-DD');
+      }
+    )
+    .replace(
+      /\{\{\s*(date|time)\s*(([+-]\d+)([yqmwdhs]))?\s*(:.+?)?\}\}/gi,
+      (_m, kind, _calc, delta, unit, fmtWithColon) => {
+        const isTime = String(kind).toLowerCase() === 'time';
+        let base = isTime ? new Date(now.getTime()) : new Date(mondayBase.getTime());
+        if (delta && unit) {
+          base = applyDateDelta(base, delta, unit);
+        }
+        const customFmt = fmtWithColon ? fmtWithColon.slice(1).trim() : '';
+        if (customFmt) {
+          return formatIsoAlignedMomentToken(base, customFmt);
+        }
+        if (isTime) {
+          return `${pad2(base.getHours())}:${pad2(base.getMinutes())}`;
+        }
+        if (!delta) {
+          return title || formatIsoAlignedMomentToken(base, defaultWeekFormat);
+        }
+        return formatIsoAlignedMomentToken(base, defaultWeekFormat);
+      }
+    );
+}
+
+module.exports = {
+  DEFAULT_WEEKLY_PRESET,
+  normalizeVaultPath,
+  getPeriodicNotesPlugin,
+  getWeeklyNotePreset,
+  formatIsoAlignedMomentToken,
+  resolveWeeklyNoteTarget,
+  resolveTemplateFile,
+  renderWeeklyTemplate,
 };
 
   },
@@ -3192,7 +3495,8 @@ module.exports = {
   "./services/vault-adapter.js": function (require, module, exports) {
 'use strict';
 
-const { formatDateYMD, pad2, getIsoWeekInfo, renderTemplateText } = require('../utils/date');
+const { formatDateYMD, pad2, renderTemplateText } = require('../utils/date');
+const { resolveWeeklyNoteTarget, resolveTemplateFile, renderWeeklyTemplate } = require('./periodic-notes-adapter');
 const { planDailyEntryInsertion, buildFlashEntryLine, buildImportantEntryLine } = require('../parsers/journal');
 const { patchAgentDeckTaskKeyword, planExecutionTaskInsertion, planRemoveTaskBlock } = require('../parsers/execution');
 const { planProjectTaskInsertion, patchTaskLine, planAddTaskDependency, planRemoveTaskDependency } = require('../parsers/project');
@@ -3469,19 +3773,31 @@ function createVaultActions({ app, obsidian, store, onPathsChanged, onBookmarksC
     await openFileAtLine(app, path);
   }
 
-  async function openOrCreateWeeklyNote() {
-    const today = formatDateYMD(new Date());
-    const info = getIsoWeekInfo(today);
-    const primaryPath = `06_日志/${info.weekTitle}.md`;
-    const altPath = `06_日志/${info.isoWeekYearTitle}.md`;
-    const targetPath = app.vault.getAbstractFileByPath(primaryPath)
-      ? primaryPath
-      : app.vault.getAbstractFileByPath(altPath)
-      ? altPath
-      : primaryPath;
-    await ensureNoteFromTemplate(app, targetPath, '02_模版/周志-xdb.md', 'weekly', today);
-    await notifyChanged([targetPath]);
-    await openFileAtLine(app, targetPath);
+  async function openOrCreateWeeklyNote(dateStr, newTab = false) {
+    const targetDate = dateStr || formatDateYMD(new Date());
+    const target = resolveWeeklyNoteTarget(app, targetDate);
+    if (!target || !target.filePath) return '';
+
+    const existing = app.vault.getAbstractFileByPath(target.filePath);
+    if (!existing) {
+      await ensureFolderExists(app, target.filePath);
+      let content = '';
+      const templatePath = target.preset?.template || '';
+      if (templatePath) {
+        const tplFile = resolveTemplateFile(app, templatePath);
+        if (tplFile) {
+          const rawTemplate = await app.vault.read(tplFile);
+          content = renderWeeklyTemplate(rawTemplate, target);
+        } else if (obsidian?.Notice) {
+          new obsidian.Notice(`未找到周志模板：${templatePath}，已创建空白周志`);
+        }
+      }
+      await app.vault.create(target.filePath, content);
+      await notifyChanged([target.filePath]);
+    }
+
+    await openFileAtLine(app, target.filePath, undefined, Boolean(newTab));
+    return target.filePath;
   }
 
   function addBookmark(payload) {
@@ -4523,6 +4839,7 @@ function createJournalCardSection({
         } else if (entry.badge || entry.hasRobot) {
           const badgeText = `${entry.hasRobot ? '🤖 ' : ''}${entry.badge || ''}`.trim();
           if (badgeText) {
+            headRow.classList.add('has-badge');
             headRow.appendChild(el('span', `ch-tl-badge kind-${entry.kind}`, badgeText));
           }
         }
@@ -4659,13 +4976,13 @@ const {
   pad2,
   formatDateYMD,
   parseYMD,
-  addDaysYMD,
   getIsoWeekInfo,
   getGreeting,
   formatRelativeTime,
 } = require('../utils/date');
 const { el, setIconSafe, preserveScroll } = require('../utils/dom');
 const { openFileAtLine } = require('../services/vault-adapter');
+const { resolveWeeklyNoteTarget } = require('../services/periodic-notes-adapter');
 const { getBookmarkIcon } = require('../services/bookmarks-adapter');
 
 function createLeftColumnSection({
@@ -4768,10 +5085,7 @@ function createLeftColumnSection({
       const todayBtn = el('button', 'ch-mini-pill-btn', '今天');
       const nextM = el('button', 'ch-mini-pill-btn', '›');
       prevM.addEventListener('click', () => {
-        const d = new Date(cursorDt);
-        if (state.calMode === 'month') d.setMonth(d.getMonth() - 1);
-        else if (state.calMode === 'week') d.setDate(d.getDate() - 7);
-        else d.setDate(d.getDate() - 1);
+        const d = new Date(cursorDt.getFullYear(), cursorDt.getMonth() - 1, 1);
         state.calCursorYMD = formatDateYMD(d);
         updateCalendar();
       });
@@ -4780,10 +5094,7 @@ function createLeftColumnSection({
         updateCalendar();
       });
       nextM.addEventListener('click', () => {
-        const d = new Date(cursorDt);
-        if (state.calMode === 'month') d.setMonth(d.getMonth() + 1);
-        else if (state.calMode === 'week') d.setDate(d.getDate() + 7);
-        else d.setDate(d.getDate() + 1);
+        const d = new Date(cursorDt.getFullYear(), cursorDt.getMonth() + 1, 1);
         state.calCursorYMD = formatDateYMD(d);
         updateCalendar();
       });
@@ -4794,66 +5105,73 @@ function createLeftColumnSection({
       nav.appendChild(el('span', '', `${cursorDt.getFullYear()}年 ${cursorDt.getMonth() + 1}月`));
       card.appendChild(nav);
 
-      const seg = el('div', 'ch-seg-tabs');
-      for (const [mode, lbl] of [['month', '月'], ['week', '周'], ['day', '日']]) {
-        const b = el('button', `ch-seg-tab ${state.calMode === mode ? 'is-active' : ''}`, lbl);
-        b.addEventListener('click', () => {
-          state.calMode = mode;
-          updateCalendar();
-        });
-        seg.appendChild(b);
+      const wds = el('div', 'ch-cal-weekdays');
+      wds.appendChild(el('div', 'ch-cal-wd ch-cal-wd-week', 'W'));
+      for (const w of ['一', '二', '三', '四', '五', '六', '日']) {
+        wds.appendChild(el('div', 'ch-cal-wd', w));
       }
-      card.appendChild(seg);
+      card.appendChild(wds);
 
-      if (state.calMode === 'day') {
-        const dayStr = state.selectedDate || state.calCursorYMD;
-        const dayTasks = state.execTasks.filter(
-          (t) => t.bucket !== 'cancelled' && t.date === dayStr
-        );
-        const dayBox = el('div', 'ch-item-list');
-        if (dayTasks.length === 0) {
-          dayBox.appendChild(el('div', 'ch-empty', `${dayStr} 今日执行暂无任务`));
-        } else {
-          for (const t of dayTasks.slice(0, 8)) {
-            const row = el('div', 'ch-list-row');
-            row.appendChild(el('span', 'ch-list-row-text', `${t.bucket === 'done' ? '✓ ' : `${t.keyword} `}${t.title}`));
-            row.addEventListener('click', () => openFileAtLine(app, t.filePath, t.lineNumber));
-            dayBox.appendChild(row);
-          }
-        }
-        card.appendChild(dayBox);
-      } else {
-        const wds = el('div', 'ch-cal-weekdays');
-        for (const w of ['一', '二', '三', '四', '五', '六', '日']) {
-          wds.appendChild(el('div', 'ch-cal-wd', w));
-        }
-        card.appendChild(wds);
+      const grid = el('div', 'ch-cal-grid');
+      const cells = [];
+      const firstOfMonth = new Date(cursorDt.getFullYear(), cursorDt.getMonth(), 1);
+      const startOffset = (firstOfMonth.getDay() + 6) % 7;
+      const startDt = new Date(firstOfMonth);
+      startDt.setDate(startDt.getDate() - startOffset);
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(startDt);
+        d.setDate(startDt.getDate() + i);
+        cells.push({
+          dateStr: formatDateYMD(d),
+          dt: d,
+          otherMonth: d.getMonth() !== cursorDt.getMonth(),
+        });
+      }
 
-        const grid = el('div', 'ch-cal-grid');
-        const cells = [];
-        if (state.calMode === 'week') {
-          const wk = getIsoWeekInfo(state.calCursorYMD);
-          for (let i = 0; i < 7; i++) {
-            const dStr = addDaysYMD(wk.weekStart, i);
-            cells.push({ dateStr: dStr, dt: parseYMD(dStr), otherMonth: false });
-          }
-        } else {
-          const firstOfMonth = new Date(cursorDt.getFullYear(), cursorDt.getMonth(), 1);
-          const startOffset = (firstOfMonth.getDay() + 6) % 7;
-          const startDt = new Date(firstOfMonth);
-          startDt.setDate(startDt.getDate() - startOffset);
-          for (let i = 0; i < 42; i++) {
-            const d = new Date(startDt);
-            d.setDate(startDt.getDate() + i);
-            cells.push({
-              dateStr: formatDateYMD(d),
-              dt: d,
-              otherMonth: d.getMonth() !== cursorDt.getMonth(),
-            });
-          }
-        }
+      const todayWeekKey = getIsoWeekInfo(today).isoWeekYearTitle;
+      const selectedWeekKey = state.selectedDate ? getIsoWeekInfo(state.selectedDate).isoWeekYearTitle : '';
 
-        for (const c of cells) {
+      for (let row = 0; row < 6; row++) {
+        const rowCells = cells.slice(row * 7, (row + 1) * 7);
+        const rowMondayYmd = rowCells[0].dateStr;
+        const wkTarget = resolveWeeklyNoteTarget(app, rowMondayYmd);
+        const wkFile = wkTarget.filePath ? app?.vault?.getAbstractFileByPath?.(wkTarget.filePath) : null;
+        const hasWeeklyNote = Boolean(wkFile && !Array.isArray(wkFile.children));
+
+        const weekCell = el('button', 'ch-cal-week-cell');
+        weekCell.dataset.weekTitle = wkTarget.title;
+        weekCell.dataset.weekPath = wkTarget.filePath;
+        if (hasWeeklyNote) weekCell.classList.add('has-note');
+        if (wkTarget.isoWeekYearTitle && wkTarget.isoWeekYearTitle === todayWeekKey) {
+          weekCell.classList.add('is-current-week');
+        }
+        if (selectedWeekKey && wkTarget.isoWeekYearTitle === selectedWeekKey) {
+          weekCell.classList.add('is-selected-week');
+        }
+        weekCell.appendChild(el('span', 'ch-cal-week-label', String(wkTarget.weekNumber)));
+        const wkDots = el('div', 'ch-cal-dots');
+        if (hasWeeklyNote) {
+          wkDots.appendChild(el('span', 'ch-cal-dot is-weekly'));
+        }
+        weekCell.appendChild(wkDots);
+        weekCell.title = `${wkTarget.title}（${wkTarget.weekStart} ~ ${wkTarget.weekEnd}）· ${
+          hasWeeklyNote ? '点击打开周志' : '尚未创建，点击新建周志'
+        }`;
+        weekCell.addEventListener('click', (e) => {
+          const isMod = Boolean(
+            obsidian?.Keymap?.isModEvent ? obsidian.Keymap.isModEvent(e) : (e.metaKey || e.ctrlKey)
+          );
+          void store.actions?.openOrCreateWeeklyNote(rowMondayYmd, isMod);
+        });
+        weekCell.addEventListener('auxclick', (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            void store.actions?.openOrCreateWeeklyNote(rowMondayYmd, true);
+          }
+        });
+        grid.appendChild(weekCell);
+
+        for (const c of rowCells) {
           const cell = el('button', 'ch-cal-cell');
           if (c.otherMonth) cell.classList.add('is-other-month');
           if (c.dateStr === today) cell.classList.add('is-today');
@@ -4878,8 +5196,8 @@ function createLeftColumnSection({
           cell.addEventListener('dblclick', () => store.actions?.openOrCreateDailyNote(c.dateStr));
           grid.appendChild(cell);
         }
-        card.appendChild(grid);
       }
+      card.appendChild(grid);
 
       if (state.selectedDate) {
         const selBar = el('div', 'ch-cal-selected-bar');
@@ -6541,6 +6859,7 @@ function createTasksCardSection({
     if ((t.keyword !== 'TODO' && t.keyword !== 'DONE') || t.hasRobot) {
       const kwText = `${t.hasRobot ? '🤖 ' : ''}${t.keyword}`.trim();
       const kwCls = t.bucket === 'doing' ? 'kind-agent' : t.bucket === 'done' ? 'kind-done' : 'kind-idea';
+      top.classList.add('has-badge');
       top.appendChild(el('span', `ch-tl-badge ${kwCls}`, kwText));
     }
 
@@ -7007,23 +7326,39 @@ function getIsoWeekInfo(dateInput) {
   const d =
     typeof dateInput === 'string'
       ? parseYMD(dateInput)
-      : new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
-  if (!d) return { weekStart: '', weekEnd: '', weekTitle: '' };
+      : dateInput instanceof Date
+      ? new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate())
+      : null;
+  if (!d) {
+    return {
+      weekStart: '',
+      weekEnd: '',
+      weekTitle: '',
+      isoWeekYearTitle: '',
+      isoWeekYear: 0,
+      weekNumber: 0,
+      weekLabel: '',
+    };
+  }
   const day = d.getDay() || 7; // Monday=1 .. Sunday=7
   const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - (day - 1));
   const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
 
-  // ISO week number & year
+  // ISO week number & year (Thursday determines the ISO week-numbering year)
   const thursday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (4 - day));
-  const yearStart = new Date(thursday.getFullYear(), 0, 1);
+  const isoWeekYear = thursday.getFullYear();
+  const yearStart = new Date(isoWeekYear, 0, 1);
   const weekNo = Math.ceil(((thursday.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  // 沿用 _journal-core.js 的首选命名 YYYY[W]WW
-  const weekTitle = `${d.getFullYear()}W${pad2(weekNo)}`;
+  const weekLabel = `W${pad2(weekNo)}`;
+  const isoWeekYearTitle = `${isoWeekYear}${weekLabel}`;
   return {
     weekStart: formatDateYMD(monday),
     weekEnd: formatDateYMD(sunday),
-    weekTitle,
-    isoWeekYearTitle: `${thursday.getFullYear()}W${pad2(weekNo)}`,
+    weekTitle: isoWeekYearTitle,
+    isoWeekYearTitle,
+    isoWeekYear,
+    weekNumber: weekNo,
+    weekLabel,
   };
 }
 

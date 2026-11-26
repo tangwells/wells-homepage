@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
 const Module = require('module');
 const path = require('path');
 
@@ -697,6 +698,10 @@ function createMockApp(initialFiles) {
         const m = String(file._content || '').match(/aliases:\s*\[?([^\n\]]+)/);
         return m ? { frontmatter: { aliases: [m[1].trim().replace(/^["']|["']$/g, '')] } } : {};
       },
+      getFirstLinkpathDest: (linkpath) => {
+        const clean = String(linkpath || '').replace(/^\/+|\/+$/g, '');
+        return filesMap.get(clean) || filesMap.get(`${clean}.md`) || null;
+      },
       on: mcEvents.on,
       offref: mcEvents.offref,
       trigger: mcEvents.trigger,
@@ -705,13 +710,13 @@ function createMockApp(initialFiles) {
       rootSplit,
       getLeavesOfType: (type) => leaves.filter((l) => l.view && l.view.getViewType && l.view.getViewType() === type),
       iterateRootLeaves: (cb) => { for (const l of leaves) cb(l); },
-      getLeaf: () => {
+      getLeaf: (newTab) => {
         const leaf = {
           app,
           view: null,
           getRoot: () => rootSplit,
           openFile: async (file, state) => {
-            openFileCalls.push({ path: file?.path, state });
+            openFileCalls.push({ path: file?.path, state, newTab: Boolean(newTab) });
           },
           updateHeader: () => {},
           setViewState: async ({ type }) => {
@@ -740,6 +745,11 @@ function createMockApp(initialFiles) {
     plugins: {
       plugins: {},
       enabledPlugins: new Set(),
+      getPlugin: (id) => {
+        const enabled = app.plugins.enabledPlugins;
+        if (enabled && enabled.size > 0 && !enabled.has(id)) return null;
+        return app.plugins.plugins[id] || null;
+      },
     },
     internalPlugins: {
       getEnabledPluginById: (id) => {
@@ -793,13 +803,73 @@ function testParsersAndUtils() {
   } = require('../src/parsers/project');
   const { computeSpiralOffset } = require('../src/services/spiral-embed');
 
-  // 日期与 ISO 周（周日起始 vs 周一起始校验：2026-09-06 是周日，仍属 W36）
+  // 日期与 ISO 周（周日起始 vs 周一起始校验：2026-09-06 是周日，仍属 W36；跨年周以周四定年）
   assert.strictEqual(getIsoWeekInfo('2026-09-06').weekTitle, '2026W36');
   assert.strictEqual(getIsoWeekInfo('2026-09-07').weekTitle, '2026W37');
+  const ny1 = getIsoWeekInfo('2025-12-29');
+  assert.strictEqual(ny1.weekTitle, '2026W01');
+  assert.strictEqual(ny1.weekLabel, 'W01');
+  assert.strictEqual(ny1.isoWeekYear, 2026);
+  assert.strictEqual(ny1.weekNumber, 1);
+  assert.strictEqual(getIsoWeekInfo('2026-01-04').weekTitle, '2026W01');
+  const ny53 = getIsoWeekInfo('2026-12-28');
+  assert.strictEqual(ny53.weekTitle, '2026W53');
+  assert.strictEqual(ny53.weekLabel, 'W53');
+  assert.strictEqual(getIsoWeekInfo('invalid').weekNumber, 0);
   assert.strictEqual(addDaysYMD('2026-11-26', 2), '2026-11-28');
   assert.strictEqual(diffDaysYMD('2026-11-24', '2026-11-26'), 2);
   assert.strictEqual(formatDateYMD(parseYMD('2026-11-26')), '2026-11-26');
   assert.ok(renderTemplateText('{{title}} {{weekStart}}..{{weekEnd}}', 'weekly', '2026-09-06').startsWith('2026W36'));
+
+  // Periodic Notes 周志预设与模板混合渲染
+  const {
+    DEFAULT_WEEKLY_PRESET,
+    getWeeklyNotePreset,
+    resolveWeeklyNoteTarget,
+    renderWeeklyTemplate,
+  } = require('../src/services/periodic-notes-adapter');
+  const pnApp = createMockApp({});
+  assert.deepStrictEqual(getWeeklyNotePreset(pnApp), { ...DEFAULT_WEEKLY_PRESET, source: 'default' });
+  pnApp.plugins.plugins['periodic-notes'] = {
+    settings: {
+      weekly: { enabled: true, folder: '/08_周志/', format: '', template: '02_模版/周志-xdb.md' },
+    },
+  };
+  assert.deepStrictEqual(getWeeklyNotePreset(pnApp), {
+    folder: '08_周志',
+    format: 'gggg[W]ww',
+    template: '02_模版/周志-xdb.md',
+    source: 'periodic-notes',
+  });
+  pnApp.plugins.plugins['periodic-notes'].settings.weekly.format = 'GGGG-[W]WW';
+  const wkTarget1 = resolveWeeklyNoteTarget(pnApp, '2026-11-26');
+  assert.strictEqual(wkTarget1.filePath, '08_周志/2026-W48.md');
+  assert.strictEqual(wkTarget1.title, '2026-W48');
+  pnApp.plugins.plugins['periodic-notes'].settings.weekly.folder = '06_日志';
+  pnApp.plugins.plugins['periodic-notes'].settings.weekly.format = 'gggg/gggg[W]ww';
+  const wkTargetCross = resolveWeeklyNoteTarget(pnApp, '2025-12-29');
+  assert.strictEqual(wkTargetCross.filePath, '06_日志/2026/2026W01.md');
+  assert.strictEqual(wkTargetCross.title, '2026W01');
+  pnApp.plugins.plugins['periodic-notes'].settings.weekly.enabled = false;
+  assert.strictEqual(getWeeklyNotePreset(pnApp).source, 'default');
+  pnApp.plugins.plugins['periodic-notes'].settings.weekly.enabled = true;
+  pnApp.plugins.enabledPlugins.add('other-plugin');
+  assert.strictEqual(getWeeklyNotePreset(pnApp).source, 'default', '未启用 periodic-notes 时应回退默认预设');
+
+  const tplOut = renderWeeklyTemplate(
+    '# {{title}}\nrange: {{weekStart}}..{{weekEnd}}\nmon: {{monday:YYYY-MM-DD}} sun: {{sunday:YYYY-MM-DD}}\nd2: {{date+2d:YYYY-MM-DD}} d0: {{date}} t: {{time}}',
+    {
+      title: '2026W48',
+      weekStart: '2026-11-23',
+      weekEnd: '2026-11-29',
+      preset: { format: 'gggg[W]ww' },
+    },
+    new Date(2026, 10, 26, 9, 5, 0)
+  );
+  assert.ok(tplOut.includes('# 2026W48'));
+  assert.ok(tplOut.includes('range: 2026-11-23..2026-11-29'));
+  assert.ok(tplOut.includes('mon: 2026-11-23 sun: 2026-11-29'));
+  assert.ok(tplOut.includes('d2: 2026-11-25 d0: 2026W48 t: 09:05'));
 
   // 设置规范化（并静默忽略遗留 pinnedEntries）
   const norm = normalizeSettings({ cardBlur: 10, ganttZoom: 'invalid', openOnStartup: false, pinnedEntries: [{ id: 'old' }] });
@@ -1031,6 +1101,14 @@ async function testIncrementalStore() {
   assert.strictEqual(dRes.gantt, false);
   assert.strictEqual(dRes.tasks, false);
   assert.strictEqual(dRes.journal, false);
+
+  // Case D: 自定义 Periodic Notes 周志目录文件变更应触发 calendar 刷新
+  app.plugins.plugins['periodic-notes'] = {
+    settings: { weekly: { enabled: true, folder: '08_周志', format: 'gggg[W]ww', template: '' } },
+  };
+  app._addOrUpdateFile('08_周志/2026W48.md', '# 2026W48', 1005);
+  const dWeekly = await store.handleBatchChanges([{ type: 'create', path: '08_周志/2026W48.md' }]);
+  assert.strictEqual(dWeekly.calendar, true, '自定义周志目录变更应触发 calendar dirty');
 }
 
 // ======================== 3. 打包产物加载与滚动位置保持测试 ========================
@@ -1102,8 +1180,23 @@ async function testBundledPluginAndScrollPreservation() {
       '## 晚上',
       '- **19:00** 晚上测试条目',
     ].join('\n'),
+    '02_模版/周志-xdb.md': [
+      '# 周志 {{title}}',
+      'range: {{weekStart}}..{{weekEnd}}',
+      'mon: {{monday:YYYY-MM-DD}} sun: {{sunday:YYYY-MM-DD}}',
+    ].join('\n'),
     '07_Resource/手册.pdf': 'pdf-binary',
   });
+  app.plugins.plugins['periodic-notes'] = {
+    settings: {
+      weekly: {
+        enabled: true,
+        folder: '06_日志',
+        format: 'gggg[W]ww',
+        template: '02_模版/周志-xdb.md',
+      },
+    },
+  };
   app._addOrUpdateFolder('05_Study/专题');
 
   const subProjGroup = {
@@ -1252,6 +1345,13 @@ async function testBundledPluginAndScrollPreservation() {
   const journalTag = journalSlot.querySelectorAll('.ch-tl-body a.tag').find((a) => a.textContent === '#工作流');
   assert.ok(journalTag, '日注主条目应渲染 #工作流 标签');
 
+  // 日注时间轴条目徽标头部标记 .has-badge
+  const tlHeadRows = journalSlot.querySelectorAll('.ch-tl-head-row');
+  const tlBadgeRows = journalSlot.querySelectorAll('.ch-tl-head-row.has-badge');
+  assert.strictEqual(tlHeadRows.length, 2, '清晨应渲染 2 条日注时间轴头部');
+  assert.strictEqual(tlBadgeRows.length, 1, '仅含条目徽标的日注条目应标记 .has-badge');
+  assert.strictEqual(tlBadgeRows[0].querySelector('.ch-tl-badge')?.textContent, '要事');
+
   // 点击日注 #标签 -> 触发 global-search
   journalTag.click();
   assert.strictEqual(app._globalSearchQueries[0], 'tag:#工作流', '点击标签应触发 tag:#工作流 全局搜索');
@@ -1280,6 +1380,19 @@ async function testBundledPluginAndScrollPreservation() {
   assert.strictEqual(childTag?.textContent, '#子块标签', '日注折叠子记录应渲染标签');
 
   // C) 任务工作区：标题与折叠子记录原生渲染
+  const taskBadgeTops = tasksSlot.querySelectorAll('.ch-task-top.has-badge');
+  assert.ok(taskBadgeTops.length >= 1, '含条目徽标的任务卡片头部应标记 .has-badge');
+  for (const top of taskBadgeTops) {
+    assert.ok(top.querySelector('.ch-tl-badge'), '.ch-task-top.has-badge 应包含 .ch-tl-badge');
+    assert.ok(top.querySelector('.ch-checkbox'), '.ch-task-top.has-badge 应包含 .ch-checkbox');
+    assert.ok(top.querySelector('.ch-task-title'), '.ch-task-top.has-badge 应包含 .ch-task-title');
+  }
+  const bundledCss = fs.readFileSync(path.join(PLUGIN_ROOT, 'styles.css'), 'utf8');
+  assert.ok(bundledCss.includes('container-name: ch-tl-card;'), 'styles.css 应声明 ch-tl-card 容器查询');
+  assert.ok(bundledCss.includes('@container ch-tl-card (max-width: 440px)'), 'styles.css 应包含日注卡片 440px 容器查询');
+  assert.ok(bundledCss.includes('container-name: ch-task-card;'), 'styles.css 应声明 ch-task-card 容器查询');
+  assert.ok(bundledCss.includes('@container ch-task-card (max-width: 360px)'), 'styles.css 应包含任务卡片 360px 容器查询');
+
   const execTitle = tasksSlot.querySelector('.ch-task-title');
   assert.ok(execTitle.querySelector('strong')?.textContent === '重点', '任务标题应渲染粗体');
   assert.ok(execTitle.querySelector('code')?.textContent === 'cli', '任务标题应渲染代码');
@@ -1297,6 +1410,110 @@ async function testBundledPluginAndScrollPreservation() {
   assertScrollIntact('后台刷新项目文件');
   await view.refreshPaths([`06_日志/${todayYmd}.md`]);
   assertScrollIntact('后台刷新日志文件');
+
+  // 6.2) 左栏日历周数列、月视图固定化与 Periodic Notes 周志联动
+  const leftColEl = view.contentEl.querySelector('.ch-left-col');
+  assert.strictEqual(leftColEl.querySelector('.ch-seg-tabs'), null, '左栏日历不得存在 月/周/日 切换标签');
+  assert.strictEqual('calMode' in view.store.state, false, 'store.state 不得保留 calMode');
+  const wdEls = leftColEl.querySelectorAll('.ch-cal-wd');
+  assert.deepStrictEqual(
+    wdEls.map((w) => w.textContent),
+    ['W', '一', '二', '三', '四', '五', '六', '日'],
+    '日历表头应为 8 列（W + 一..日）'
+  );
+  const weekCells = leftColEl.querySelectorAll('.ch-cal-week-cell');
+  const dayCells = leftColEl.querySelectorAll('.ch-cal-cell');
+  assert.strictEqual(weekCells.length, 6, '月视图应固定渲染 6 个周数格');
+  assert.strictEqual(dayCells.length, 42, '月视图应固定渲染 42 个日期格');
+  for (const wc of weekCells) {
+    assert.match(wc.querySelector('.ch-cal-week-label')?.textContent || '', /^\d{1,2}$/, '周数格应仅展示纯数字周号');
+  }
+  assert.ok(bundledCss.includes('.ch-root .ch-cal-grid::before'), 'styles.css 应包含 .ch-root .ch-cal-grid::before 连续垂直分隔线样式');
+  assert.ok(bundledCss.includes('.ch-root button.ch-cal-week-cell'), 'styles.css 应包含 .ch-root button.ch-cal-week-cell 优先级提升样式');
+  assert.ok(bundledCss.includes('.ch-root button.ch-cal-cell'), 'styles.css 应包含 .ch-root button.ch-cal-cell 优先级提升样式');
+  assert.ok(bundledCss.includes('box-shadow: none;'), 'styles.css 应显式清除日历格默认按钮阴影');
+  const currentWeekCell = leftColEl.querySelector('.ch-cal-week-cell.is-current-week');
+  assert.ok(currentWeekCell, '本周所在行应高亮 .is-current-week');
+
+  // 选中某日期 -> 联动对应周 .is-selected-week
+  const targetDayCell = dayCells[10];
+  targetDayCell.click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(leftColEl.querySelector('.ch-cal-week-cell.is-selected-week'), '选中日期后所在周应标记 .is-selected-week');
+  targetDayCell.click();
+  await new Promise((r) => setTimeout(r, 10));
+
+  // 月末边界：3 月 31 日点上一月应来到 2 月而非跳过
+  view.store.state.calCursorYMD = '2026-03-31';
+  view.leftCol.updateCalendar();
+  leftColEl.querySelector('.ch-cal-nav-left button').click();
+  assert.ok(leftColEl.querySelector('.ch-cal-nav').textContent.includes('2026年 2月'), '3月31日点上一月应显示2026年 2月');
+  leftColEl.querySelectorAll('.ch-cal-nav-left button')[1].click();
+
+  // 点击不存在的周志 -> 按 Periodic Notes 预设和模板创建并打开
+  const freshWeekCell = leftColEl.querySelectorAll('.ch-cal-week-cell').find((c) => !c.classList.contains('has-note'));
+  assert.ok(freshWeekCell, '应存在尚未创建周志的周数格');
+  const freshWeekPath = freshWeekCell.dataset.weekPath;
+  const freshWeekTitle = freshWeekCell.dataset.weekTitle;
+  freshWeekCell.click();
+  await new Promise((r) => setTimeout(r, 10));
+  assertScrollIntact('点击周数创建周志');
+  const createdWeeklyFile = app.vault.getAbstractFileByPath(freshWeekPath);
+  assert.ok(createdWeeklyFile, `应按预设路径创建周志 ${freshWeekPath}`);
+  assert.ok(createdWeeklyFile._content.includes(`# 周志 ${freshWeekTitle}`), '周志模板应替换 {{title}}');
+  assert.ok(!createdWeeklyFile._content.includes('{{'), '周志模板不应残留未替换占位符');
+  assert.strictEqual(app._openFileCalls[app._openFileCalls.length - 1].path, freshWeekPath);
+  assert.strictEqual(app._openFileCalls[app._openFileCalls.length - 1].newTab, false);
+
+  const refreshedWeekCell = leftColEl
+    .querySelectorAll('.ch-cal-week-cell')
+    .find((c) => c.dataset.weekPath === freshWeekPath);
+  assert.ok(refreshedWeekCell.classList.contains('has-note'), '创建周志后对应周数格应标为 .has-note');
+  assert.ok(refreshedWeekCell.querySelector('.ch-cal-dot.is-weekly'), '创建周志后应显示周志存在圆点');
+
+  // 再次点击已存在周志不覆盖原内容，且支持 Cmd/Ctrl + 单击与中键新标签打开
+  createdWeeklyFile._content += '\n保留手写内容';
+  refreshedWeekCell.click({ metaKey: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(createdWeeklyFile._content.includes('保留手写内容'), '点击已存在周志不得覆盖原内容');
+  assert.strictEqual(app._openFileCalls[app._openFileCalls.length - 1].newTab, true, 'Cmd/Ctrl+单击应新标签页打开');
+  refreshedWeekCell.dispatchEvent({ type: 'auxclick', button: 1, target: refreshedWeekCell });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.strictEqual(app._openFileCalls[app._openFileCalls.length - 1].newTab, true, '中键单击应新标签页打开');
+
+  // 模板缺失时应创建空白周志并弹 Notice 提醒
+  app.plugins.plugins['periodic-notes'].settings.weekly.template = '02_模版/不存在.md';
+  mockObsidian.Notice.history.length = 0;
+  const anotherFreshWeek = leftColEl.querySelectorAll('.ch-cal-week-cell').find((c) => !c.classList.contains('has-note'));
+  assert.ok(anotherFreshWeek);
+  const missingTplTargetPath = anotherFreshWeek.dataset.weekPath;
+  anotherFreshWeek.click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.strictEqual(app.vault.getAbstractFileByPath(missingTplTargetPath)?._content, '', '模板缺失时应创建空白周志');
+  assert.ok(mockObsidian.Notice.history.some((m) => m.includes('未找到周志模板')), '模板缺失时应弹出 Notice 提醒');
+
+  // 顶部快捷栏「打开/创建本周周志」同样遵循 Periodic Notes 自定义预设
+  app.plugins.plugins['periodic-notes'].settings.weekly = {
+    enabled: true,
+    folder: '08_周志',
+    format: 'gggg-[W]ww',
+    template: '02_模版/周志-xdb.md',
+  };
+  const weeklyQuickBtn = view.contentEl
+    .querySelectorAll('.ch-quick-tile')
+    .find((b) => b.title === '打开/创建本周周志');
+  assert.ok(weeklyQuickBtn, '应找到顶部本周周志快捷按钮');
+  weeklyQuickBtn.click();
+  await new Promise((r) => setTimeout(r, 10));
+  const lastOpenedQuick = app._openFileCalls[app._openFileCalls.length - 1].path;
+  assert.ok(lastOpenedQuick.startsWith('08_周志/'), `顶部快捷按钮应遵循 Periodic Notes 预设目录，实际: ${lastOpenedQuick}`);
+  // 恢复默认设置
+  app.plugins.plugins['periodic-notes'].settings.weekly = {
+    enabled: true,
+    folder: '06_日志',
+    format: 'gggg[W]ww',
+    template: '02_模版/周志-xdb.md',
+  };
 
   // 6.5) 书签完整树形同步、增删、打开与降级恢复验证
   const bmList = view.contentEl.querySelector('.ch-bm-list');

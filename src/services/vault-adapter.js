@@ -1,6 +1,7 @@
 'use strict';
 
-const { formatDateYMD, pad2, getIsoWeekInfo, renderTemplateText } = require('../utils/date');
+const { formatDateYMD, pad2, renderTemplateText } = require('../utils/date');
+const { resolveWeeklyNoteTarget, resolveTemplateFile, renderWeeklyTemplate } = require('./periodic-notes-adapter');
 const { planDailyEntryInsertion, buildFlashEntryLine, buildImportantEntryLine } = require('../parsers/journal');
 const { patchAgentDeckTaskKeyword, planExecutionTaskInsertion, planRemoveTaskBlock } = require('../parsers/execution');
 const { planProjectTaskInsertion, patchTaskLine, planAddTaskDependency, planRemoveTaskDependency } = require('../parsers/project');
@@ -277,19 +278,31 @@ function createVaultActions({ app, obsidian, store, onPathsChanged, onBookmarksC
     await openFileAtLine(app, path);
   }
 
-  async function openOrCreateWeeklyNote() {
-    const today = formatDateYMD(new Date());
-    const info = getIsoWeekInfo(today);
-    const primaryPath = `06_日志/${info.weekTitle}.md`;
-    const altPath = `06_日志/${info.isoWeekYearTitle}.md`;
-    const targetPath = app.vault.getAbstractFileByPath(primaryPath)
-      ? primaryPath
-      : app.vault.getAbstractFileByPath(altPath)
-      ? altPath
-      : primaryPath;
-    await ensureNoteFromTemplate(app, targetPath, '02_模版/周志-xdb.md', 'weekly', today);
-    await notifyChanged([targetPath]);
-    await openFileAtLine(app, targetPath);
+  async function openOrCreateWeeklyNote(dateStr, newTab = false) {
+    const targetDate = dateStr || formatDateYMD(new Date());
+    const target = resolveWeeklyNoteTarget(app, targetDate);
+    if (!target || !target.filePath) return '';
+
+    const existing = app.vault.getAbstractFileByPath(target.filePath);
+    if (!existing) {
+      await ensureFolderExists(app, target.filePath);
+      let content = '';
+      const templatePath = target.preset?.template || '';
+      if (templatePath) {
+        const tplFile = resolveTemplateFile(app, templatePath);
+        if (tplFile) {
+          const rawTemplate = await app.vault.read(tplFile);
+          content = renderWeeklyTemplate(rawTemplate, target);
+        } else if (obsidian?.Notice) {
+          new obsidian.Notice(`未找到周志模板：${templatePath}，已创建空白周志`);
+        }
+      }
+      await app.vault.create(target.filePath, content);
+      await notifyChanged([target.filePath]);
+    }
+
+    await openFileAtLine(app, target.filePath, undefined, Boolean(newTab));
+    return target.filePath;
   }
 
   function addBookmark(payload) {

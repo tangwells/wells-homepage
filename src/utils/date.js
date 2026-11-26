@@ -41,23 +41,39 @@ function getIsoWeekInfo(dateInput) {
   const d =
     typeof dateInput === 'string'
       ? parseYMD(dateInput)
-      : new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
-  if (!d) return { weekStart: '', weekEnd: '', weekTitle: '' };
+      : dateInput instanceof Date
+      ? new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate())
+      : null;
+  if (!d) {
+    return {
+      weekStart: '',
+      weekEnd: '',
+      weekTitle: '',
+      isoWeekYearTitle: '',
+      isoWeekYear: 0,
+      weekNumber: 0,
+      weekLabel: '',
+    };
+  }
   const day = d.getDay() || 7; // Monday=1 .. Sunday=7
   const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - (day - 1));
   const sunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6);
 
-  // ISO week number & year
+  // ISO week number & year (Thursday determines the ISO week-numbering year)
   const thursday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + (4 - day));
-  const yearStart = new Date(thursday.getFullYear(), 0, 1);
+  const isoWeekYear = thursday.getFullYear();
+  const yearStart = new Date(isoWeekYear, 0, 1);
   const weekNo = Math.ceil(((thursday.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  // 沿用 _journal-core.js 的首选命名 YYYY[W]WW
-  const weekTitle = `${d.getFullYear()}W${pad2(weekNo)}`;
+  const weekLabel = `W${pad2(weekNo)}`;
+  const isoWeekYearTitle = `${isoWeekYear}${weekLabel}`;
   return {
     weekStart: formatDateYMD(monday),
     weekEnd: formatDateYMD(sunday),
-    weekTitle,
-    isoWeekYearTitle: `${thursday.getFullYear()}W${pad2(weekNo)}`,
+    weekTitle: isoWeekYearTitle,
+    isoWeekYearTitle,
+    isoWeekYear,
+    weekNumber: weekNo,
+    weekLabel,
   };
 }
 

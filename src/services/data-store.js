@@ -2,6 +2,7 @@
 
 const { formatDateYMD, getPeriodTitleByHour, pickDefaultJournalPeriod } = require('../utils/date');
 const { getBookmarksPlugin, buildBookmarkTree } = require('./bookmarks-adapter');
+const { getWeeklyNotePreset } = require('./periodic-notes-adapter');
 const { scanMarkdownTasks } = require('../parsers/markdown');
 const { parseDailyActiveStatus, parseDailyJournalTimeline } = require('../parsers/journal');
 const { parseExecutionTasksFromDaily } = require('../parsers/execution');
@@ -60,7 +61,6 @@ class VaultDataStore {
       ideaBatch: [],
       ideaPage: 0,
       activeStatus: emptyActiveStatus(),
-      calMode: 'month',
       calCursorYMD: todayStr,
       selectedDate: '',
       dailyFilesSet: new Set(),
@@ -334,7 +334,9 @@ class VaultDataStore {
 
     let projectsDirty = false;
     let logsDirty = false;
+    let weeklyDirty = false;
     let recentDirty = false;
+    const weeklyFolder = getWeeklyNotePreset(this.app).folder;
 
     const toReadProjects = new Map();
     const toReadLogs = new Map();
@@ -353,6 +355,9 @@ class VaultDataStore {
         const p = item.path;
         if (!p || !p.endsWith('.md')) continue;
         if (isRecentCandidatePath(p)) recentDirty = true;
+        if (weeklyFolder ? p.startsWith(`${weeklyFolder}/`) : !p.includes('/')) {
+          weeklyDirty = true;
+        }
 
         if (p.startsWith('04_Project/')) {
           if (item.removed) {
@@ -446,6 +451,8 @@ class VaultDataStore {
       dirty.sticky = true;
       dirty.calendar = true;
       dirty.tasks = true;
+    } else if (weeklyDirty) {
+      dirty.calendar = true;
     }
 
     if (recentDirty) {

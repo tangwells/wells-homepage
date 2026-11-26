@@ -102,6 +102,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
   min-height: 180px;
   max-height: 460px;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -152,6 +153,9 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   cursor: grab;
   transition: border-color 0.14s, transform 0.12s;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: ch-task-card;
 }
 
 .ch-task-card:hover {
@@ -172,6 +176,7 @@
   display: flex;
   align-items: flex-start;
   gap: 7px;
+  min-width: 0;
 }
 
 .ch-checkbox {
@@ -210,11 +215,45 @@
   cursor: pointer;
   word-break: break-word;
   flex: 1;
+  min-width: 0;
 }
 
 .ch-task-card.is-done .ch-task-title {
   text-decoration: line-through;
   color: var(--ch-text-faint);
+}
+
+/* 窄卡片下将条目徽标移至顶部独立一行，复选框与任务标题保持同行在下方 */
+@container ch-task-card (max-width: 360px) {
+  .ch-task-top.has-badge {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 7px;
+    row-gap: 4px;
+    align-items: start;
+  }
+
+  .ch-root.ch-density-small .ch-task-top.has-badge {
+    row-gap: 3px;
+  }
+
+  .ch-task-top.has-badge > .ch-tl-badge {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: start;
+    margin-top: 0;
+  }
+
+  .ch-task-top.has-badge > .ch-checkbox {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .ch-task-top.has-badge > .ch-task-title {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+  }
 }
 
 .ch-inline-link {

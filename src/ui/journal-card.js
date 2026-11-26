@@ -140,6 +140,7 @@ function createJournalCardSection({
         } else if (entry.badge || entry.hasRobot) {
           const badgeText = `${entry.hasRobot ? '🤖 ' : ''}${entry.badge || ''}`.trim();
           if (badgeText) {
+            headRow.classList.add('has-badge');
             headRow.appendChild(el('span', `ch-tl-badge kind-${entry.kind}`, badgeText));
           }
         }

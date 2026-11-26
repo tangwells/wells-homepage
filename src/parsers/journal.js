@@ -282,13 +282,13 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
     } else if (statusChar === 'I') {
       kind = 'idea';
       badge = '闪念';
-      body = body.replace(/(?:^|\s)#闪念\b/g, ' ').trim();
+      body = body.replace(/(?:^|\s)#闪念(?=\s|$)/g, ' ').trim();
     } else if (statusChar === 'i') {
-      if (/(?:^|\s)#要事\b/.test(body)) {
+      if (/(?:^|\s)#要事(?=\s|$)/.test(body)) {
         kind = 'important';
         badge = '要事';
-        body = body.replace(/(?:^|\s)#要事\b/g, ' ').trim();
-      } else if (/(?:^|\s)#进度\b/.test(body)) {
+        body = body.replace(/(?:^|\s)#要事(?=\s|$)/g, ' ').trim();
+      } else if (/(?:^|\s)#进度(?=\s|$)/.test(body)) {
         kind = 'progress';
         badge = '进度';
       } else {

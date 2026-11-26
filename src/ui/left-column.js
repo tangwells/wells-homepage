@@ -5,13 +5,13 @@ const {
   pad2,
   formatDateYMD,
   parseYMD,
-  addDaysYMD,
   getIsoWeekInfo,
   getGreeting,
   formatRelativeTime,
 } = require('../utils/date');
 const { el, setIconSafe, preserveScroll } = require('../utils/dom');
 const { openFileAtLine } = require('../services/vault-adapter');
+const { resolveWeeklyNoteTarget } = require('../services/periodic-notes-adapter');
 const { getBookmarkIcon } = require('../services/bookmarks-adapter');
 
 function createLeftColumnSection({
@@ -114,10 +114,7 @@ function createLeftColumnSection({
       const todayBtn = el('button', 'ch-mini-pill-btn', '今天');
       const nextM = el('button', 'ch-mini-pill-btn', '›');
       prevM.addEventListener('click', () => {
-        const d = new Date(cursorDt);
-        if (state.calMode === 'month') d.setMonth(d.getMonth() - 1);
-        else if (state.calMode === 'week') d.setDate(d.getDate() - 7);
-        else d.setDate(d.getDate() - 1);
+        const d = new Date(cursorDt.getFullYear(), cursorDt.getMonth() - 1, 1);
         state.calCursorYMD = formatDateYMD(d);
         updateCalendar();
       });
@@ -126,10 +123,7 @@ function createLeftColumnSection({
         updateCalendar();
       });
       nextM.addEventListener('click', () => {
-        const d = new Date(cursorDt);
-        if (state.calMode === 'month') d.setMonth(d.getMonth() + 1);
-        else if (state.calMode === 'week') d.setDate(d.getDate() + 7);
-        else d.setDate(d.getDate() + 1);
+        const d = new Date(cursorDt.getFullYear(), cursorDt.getMonth() + 1, 1);
         state.calCursorYMD = formatDateYMD(d);
         updateCalendar();
       });
@@ -140,66 +134,73 @@ function createLeftColumnSection({
       nav.appendChild(el('span', '', `${cursorDt.getFullYear()}年 ${cursorDt.getMonth() + 1}月`));
       card.appendChild(nav);
 
-      const seg = el('div', 'ch-seg-tabs');
-      for (const [mode, lbl] of [['month', '月'], ['week', '周'], ['day', '日']]) {
-        const b = el('button', `ch-seg-tab ${state.calMode === mode ? 'is-active' : ''}`, lbl);
-        b.addEventListener('click', () => {
-          state.calMode = mode;
-          updateCalendar();
-        });
-        seg.appendChild(b);
+      const wds = el('div', 'ch-cal-weekdays');
+      wds.appendChild(el('div', 'ch-cal-wd ch-cal-wd-week', 'W'));
+      for (const w of ['一', '二', '三', '四', '五', '六', '日']) {
+        wds.appendChild(el('div', 'ch-cal-wd', w));
       }
-      card.appendChild(seg);
+      card.appendChild(wds);
 
-      if (state.calMode === 'day') {
-        const dayStr = state.selectedDate || state.calCursorYMD;
-        const dayTasks = state.execTasks.filter(
-          (t) => t.bucket !== 'cancelled' && t.date === dayStr
-        );
-        const dayBox = el('div', 'ch-item-list');
-        if (dayTasks.length === 0) {
-          dayBox.appendChild(el('div', 'ch-empty', `${dayStr} 今日执行暂无任务`));
-        } else {
-          for (const t of dayTasks.slice(0, 8)) {
-            const row = el('div', 'ch-list-row');
-            row.appendChild(el('span', 'ch-list-row-text', `${t.bucket === 'done' ? '✓ ' : `${t.keyword} `}${t.title}`));
-            row.addEventListener('click', () => openFileAtLine(app, t.filePath, t.lineNumber));
-            dayBox.appendChild(row);
-          }
-        }
-        card.appendChild(dayBox);
-      } else {
-        const wds = el('div', 'ch-cal-weekdays');
-        for (const w of ['一', '二', '三', '四', '五', '六', '日']) {
-          wds.appendChild(el('div', 'ch-cal-wd', w));
-        }
-        card.appendChild(wds);
+      const grid = el('div', 'ch-cal-grid');
+      const cells = [];
+      const firstOfMonth = new Date(cursorDt.getFullYear(), cursorDt.getMonth(), 1);
+      const startOffset = (firstOfMonth.getDay() + 6) % 7;
+      const startDt = new Date(firstOfMonth);
+      startDt.setDate(startDt.getDate() - startOffset);
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(startDt);
+        d.setDate(startDt.getDate() + i);
+        cells.push({
+          dateStr: formatDateYMD(d),
+          dt: d,
+          otherMonth: d.getMonth() !== cursorDt.getMonth(),
+        });
+      }
 
-        const grid = el('div', 'ch-cal-grid');
-        const cells = [];
-        if (state.calMode === 'week') {
-          const wk = getIsoWeekInfo(state.calCursorYMD);
-          for (let i = 0; i < 7; i++) {
-            const dStr = addDaysYMD(wk.weekStart, i);
-            cells.push({ dateStr: dStr, dt: parseYMD(dStr), otherMonth: false });
-          }
-        } else {
-          const firstOfMonth = new Date(cursorDt.getFullYear(), cursorDt.getMonth(), 1);
-          const startOffset = (firstOfMonth.getDay() + 6) % 7;
-          const startDt = new Date(firstOfMonth);
-          startDt.setDate(startDt.getDate() - startOffset);
-          for (let i = 0; i < 42; i++) {
-            const d = new Date(startDt);
-            d.setDate(startDt.getDate() + i);
-            cells.push({
-              dateStr: formatDateYMD(d),
-              dt: d,
-              otherMonth: d.getMonth() !== cursorDt.getMonth(),
-            });
-          }
-        }
+      const todayWeekKey = getIsoWeekInfo(today).isoWeekYearTitle;
+      const selectedWeekKey = state.selectedDate ? getIsoWeekInfo(state.selectedDate).isoWeekYearTitle : '';
 
-        for (const c of cells) {
+      for (let row = 0; row < 6; row++) {
+        const rowCells = cells.slice(row * 7, (row + 1) * 7);
+        const rowMondayYmd = rowCells[0].dateStr;
+        const wkTarget = resolveWeeklyNoteTarget(app, rowMondayYmd);
+        const wkFile = wkTarget.filePath ? app?.vault?.getAbstractFileByPath?.(wkTarget.filePath) : null;
+        const hasWeeklyNote = Boolean(wkFile && !Array.isArray(wkFile.children));
+
+        const weekCell = el('button', 'ch-cal-week-cell');
+        weekCell.dataset.weekTitle = wkTarget.title;
+        weekCell.dataset.weekPath = wkTarget.filePath;
+        if (hasWeeklyNote) weekCell.classList.add('has-note');
+        if (wkTarget.isoWeekYearTitle && wkTarget.isoWeekYearTitle === todayWeekKey) {
+          weekCell.classList.add('is-current-week');
+        }
+        if (selectedWeekKey && wkTarget.isoWeekYearTitle === selectedWeekKey) {
+          weekCell.classList.add('is-selected-week');
+        }
+        weekCell.appendChild(el('span', 'ch-cal-week-label', String(wkTarget.weekNumber)));
+        const wkDots = el('div', 'ch-cal-dots');
+        if (hasWeeklyNote) {
+          wkDots.appendChild(el('span', 'ch-cal-dot is-weekly'));
+        }
+        weekCell.appendChild(wkDots);
+        weekCell.title = `${wkTarget.title}（${wkTarget.weekStart} ~ ${wkTarget.weekEnd}）· ${
+          hasWeeklyNote ? '点击打开周志' : '尚未创建，点击新建周志'
+        }`;
+        weekCell.addEventListener('click', (e) => {
+          const isMod = Boolean(
+            obsidian?.Keymap?.isModEvent ? obsidian.Keymap.isModEvent(e) : (e.metaKey || e.ctrlKey)
+          );
+          void store.actions?.openOrCreateWeeklyNote(rowMondayYmd, isMod);
+        });
+        weekCell.addEventListener('auxclick', (e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            void store.actions?.openOrCreateWeeklyNote(rowMondayYmd, true);
+          }
+        });
+        grid.appendChild(weekCell);
+
+        for (const c of rowCells) {
           const cell = el('button', 'ch-cal-cell');
           if (c.otherMonth) cell.classList.add('is-other-month');
           if (c.dateStr === today) cell.classList.add('is-today');
@@ -224,8 +225,8 @@ function createLeftColumnSection({
           cell.addEventListener('dblclick', () => store.actions?.openOrCreateDailyNote(c.dateStr));
           grid.appendChild(cell);
         }
-        card.appendChild(grid);
       }
+      card.appendChild(grid);
 
       if (state.selectedDate) {
         const selBar = el('div', 'ch-cal-selected-bar');

@@ -175,6 +175,8 @@
   gap: 6px;
   transition: border-color 0.14s;
   min-width: 0;
+  container-type: inline-size;
+  container-name: ch-tl-card;
 }
 
 .ch-tl-card:hover {
@@ -254,6 +256,24 @@
   background: var(--ch-accent-soft);
   border-color: rgba(111, 143, 91, 0.35);
   color: var(--ch-accent-strong);
+}
+
+/* 窄容器下将条目徽标移至正文上方，避免挤占阅读宽度（复选框保持同行） */
+@container ch-tl-card (max-width: 440px) {
+  .ch-tl-head-row.has-badge {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .ch-tl-head-row.has-badge > .ch-tl-badge {
+    align-self: flex-start;
+    margin-top: 0;
+  }
+
+  .ch-tl-head-row.has-badge > .ch-tl-body {
+    flex: none;
+    width: 100%;
+  }
 }
 
 .ch-tl-fold-bar {

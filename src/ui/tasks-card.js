@@ -51,6 +51,7 @@ function createTasksCardSection({
     if ((t.keyword !== 'TODO' && t.keyword !== 'DONE') || t.hasRobot) {
       const kwText = `${t.hasRobot ? '🤖 ' : ''}${t.keyword}`.trim();
       const kwCls = t.bucket === 'doing' ? 'kind-agent' : t.bucket === 'done' ? 'kind-done' : 'kind-idea';
+      top.classList.add('has-badge');
       top.appendChild(el('span', `ch-tl-badge ${kwCls}`, kwText));
     }
 

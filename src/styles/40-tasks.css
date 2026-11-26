@@ -1,0 +1,347 @@
+/* ---- 右栏：任务工作区 ---- */
+.ch-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ch-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.ch-select, .ch-input {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface-subtle);
+  color: var(--ch-text);
+  font-size: 12px;
+  padding: 0 8px;
+  outline: none;
+}
+
+.ch-select:focus, .ch-input:focus {
+  border-color: var(--ch-accent);
+}
+
+.ch-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ch-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface-subtle);
+  color: var(--ch-text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s;
+}
+
+.ch-pill:hover {
+  border-color: var(--ch-accent);
+  color: var(--ch-text);
+}
+
+.ch-pill.is-active {
+  background: var(--ch-accent);
+  border-color: var(--ch-accent);
+  color: #fff;
+}
+
+.ch-pill-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--ch-border);
+  margin: 0 2px;
+}
+
+.ch-kanban-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.ch-kanban-grid.cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ch-kanban-grid.cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ch-root.ch-narrow .ch-kanban-grid,
+.ch-root.ch-compact .ch-kanban-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ch-root.ch-compact .ch-kanban-grid {
+  grid-template-columns: 1fr;
+}
+
+.ch-kanban-col {
+  border-radius: 12px;
+  padding: 8px;
+  border: 1px solid var(--ch-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 180px;
+  max-height: 460px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ch-kanban-col.is-drag-over {
+  border-color: var(--ch-accent);
+  box-shadow: inset 0 0 0 1px var(--ch-accent);
+}
+
+.ch-kanban-col[data-col="todo"] { background: var(--ch-col-todo-bg); }
+.ch-kanban-col[data-col="doing"] { background: var(--ch-col-doing-bg); }
+.ch-kanban-col[data-col="done"] { background: var(--ch-col-done-bg); }
+.ch-kanban-col[data-col="unscheduled"] { background: var(--ch-col-unsched-bg); }
+
+.ch-kanban-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.ch-kanban-col[data-col="todo"] .ch-kanban-col-head { background: var(--ch-col-todo-head); }
+.ch-kanban-col[data-col="doing"] .ch-kanban-col-head { background: var(--ch-col-doing-head); }
+.ch-kanban-col[data-col="done"] .ch-kanban-col-head { background: var(--ch-col-done-head); }
+.ch-kanban-col[data-col="unscheduled"] .ch-kanban-col-head { background: var(--ch-col-unsched-head); }
+
+.ch-kanban-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow-y: auto;
+  padding-right: 2px;
+  flex: 1;
+}
+
+.ch-task-card {
+  background: var(--ch-surface-solid);
+  border: 1px solid var(--ch-border);
+  border-radius: 10px;
+  padding: 8px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  cursor: grab;
+  transition: border-color 0.14s, transform 0.12s;
+}
+
+.ch-task-card:hover {
+  border-color: var(--ch-accent);
+}
+
+.ch-root.ch-density-small .ch-task-card {
+  padding: 5px 7px;
+  gap: 3px;
+}
+
+.ch-root.ch-density-large .ch-task-card {
+  padding: 11px 11px;
+  gap: 7px;
+}
+
+.ch-task-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.ch-checkbox {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 4px;
+  border: 1.5px solid var(--ch-text-faint);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.ch-checkbox.is-done {
+  background: var(--ch-accent);
+  border-color: var(--ch-accent);
+}
+
+.ch-checkbox.is-doing {
+  border-color: var(--ch-info);
+  color: var(--ch-info);
+}
+
+.ch-task-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.38;
+  color: var(--ch-text);
+  cursor: pointer;
+  word-break: break-word;
+  flex: 1;
+}
+
+.ch-task-card.is-done .ch-task-title {
+  text-decoration: line-through;
+  color: var(--ch-text-faint);
+}
+
+.ch-inline-link {
+  color: var(--ch-accent-strong);
+  text-decoration: none;
+}
+
+.ch-inline-link:hover {
+  text-decoration: underline;
+}
+
+.ch-task-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  color: var(--ch-text-muted);
+}
+
+.ch-task-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ch-tag-chip {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--ch-surface-subtle);
+  border: 1px solid var(--ch-border);
+  font-size: 10px;
+  color: var(--ch-text-muted);
+}
+
+.ch-tag-chip.is-overdue {
+  background: var(--ch-danger-soft);
+  border-color: rgba(212, 93, 93, 0.35);
+  color: var(--ch-danger);
+  font-weight: 600;
+}
+
+.ch-tag-chip.is-today {
+  background: var(--ch-accent-soft);
+  border-color: rgba(111, 143, 91, 0.35);
+  color: var(--ch-accent-strong);
+  font-weight: 600;
+}
+
+.ch-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ch-tiny-icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--ch-border);
+  background: transparent;
+  color: var(--ch-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+}
+
+.ch-tiny-icon-btn:hover {
+  background: var(--ch-accent-soft);
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
+}
+
+.ch-col-add-btn {
+  width: 100%;
+  border: 1px dashed var(--ch-border);
+  background: transparent;
+  border-radius: 8px;
+  padding: 4px;
+  color: var(--ch-text-faint);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ch-col-add-btn:hover {
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
+  background: var(--ch-accent-soft);
+}
+
+/* ---- 任务清单视图 ---- */
+.ch-agenda-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 460px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ch-agenda-group-head {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ch-text-muted);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--ch-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ch-agenda-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--ch-surface-subtle);
+  border: 1px solid var(--ch-border);
+}
+
+.ch-agenda-row:hover {
+  border-color: var(--ch-accent);
+}

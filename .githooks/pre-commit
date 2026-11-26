@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+if ! /usr/bin/python3 "$ROOT/scripts/build.py" --check; then
+  if [ "${CARROT_HOME_AUTO_SYNC:-0}" = "1" ]; then
+    echo "WARNING: main.js/styles.css are out of sync with src/; allowing auto-sync backup commit." >&2
+    exit 0
+  fi
+  echo "Commit blocked: run 'python3 scripts/build.py' to rebuild main.js and styles.css before committing." >&2
+  exit 1
+fi

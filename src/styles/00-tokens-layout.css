@@ -1,0 +1,381 @@
+.workspace-leaf-content[data-type="carrot-home-view"] .view-content {
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-root {
+  --ch-accent: #6f8f5b;
+  --ch-accent-strong: #587646;
+  --ch-accent-soft: rgba(111, 143, 91, 0.14);
+  --ch-danger: #d45d5d;
+  --ch-danger-soft: rgba(212, 93, 93, 0.14);
+  --ch-warn: #d48c3a;
+  --ch-warn-soft: rgba(212, 140, 58, 0.14);
+  --ch-info: #4b87a8;
+  --ch-card-opacity: 0.78;
+  --ch-card-blur: 0px;
+  --ch-card-radius: 14px;
+  --ch-bg-opacity: 0.32;
+  --ch-bg-blur: 2px;
+  --ch-surface: rgba(255, 255, 255, var(--ch-card-opacity));
+  --ch-surface-solid: #ffffff;
+  --ch-surface-subtle: rgba(247, 248, 245, 0.85);
+  --ch-border: rgba(15, 23, 42, 0.09);
+  --ch-shadow: 0 6px 24px rgba(15, 23, 42, 0.05);
+  --ch-text: var(--text-normal, #1e2421);
+  --ch-text-muted: var(--text-muted, #626b65);
+  --ch-text-faint: var(--text-faint, #9aa39d);
+  --ch-col-todo-bg: rgba(235, 244, 229, 0.65);
+  --ch-col-todo-head: rgba(111, 143, 91, 0.18);
+  --ch-col-doing-bg: rgba(227, 243, 247, 0.65);
+  --ch-col-doing-head: rgba(75, 135, 168, 0.18);
+  --ch-col-done-bg: rgba(238, 234, 248, 0.65);
+  --ch-col-done-head: rgba(130, 112, 180, 0.18);
+  --ch-col-unsched-bg: rgba(251, 240, 228, 0.65);
+  --ch-col-unsched-head: rgba(212, 140, 58, 0.18);
+  --ch-sticky-paper: #fffdf5;
+  --ch-sticky-border: rgba(186, 168, 126, 0.35);
+  --ch-important-paper: #fdf3f1;
+  --ch-important-border: rgba(207, 77, 74, 0.36);
+  --ch-important-accent: #c94c48;
+  --ch-important-pin-top: #dc7b74;
+  --ch-important-pin-bot: #b14a45;
+  --ch-rope: #c4a47c;
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  color: var(--ch-text);
+  font-family: var(--font-interface);
+  box-sizing: border-box;
+  overflow: hidden;
+  isolation: isolate;
+  background: transparent;
+}
+
+.theme-dark .ch-root {
+  --ch-accent: #8ab072;
+  --ch-accent-strong: #9fc488;
+  --ch-accent-soft: rgba(138, 176, 114, 0.18);
+  --ch-danger: #e27878;
+  --ch-danger-soft: rgba(226, 120, 120, 0.18);
+  --ch-warn: #e0a052;
+  --ch-warn-soft: rgba(224, 160, 82, 0.18);
+  --ch-info: #6aa9cc;
+  --ch-surface: rgba(30, 34, 40, var(--ch-card-opacity));
+  --ch-surface-solid: #23272e;
+  --ch-surface-subtle: rgba(38, 43, 50, 0.85);
+  --ch-border: rgba(255, 255, 255, 0.09);
+  --ch-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  --ch-col-todo-bg: rgba(42, 54, 40, 0.55);
+  --ch-col-todo-head: rgba(138, 176, 114, 0.22);
+  --ch-col-doing-bg: rgba(36, 54, 64, 0.55);
+  --ch-col-doing-head: rgba(106, 169, 204, 0.22);
+  --ch-col-done-bg: rgba(48, 43, 66, 0.55);
+  --ch-col-done-head: rgba(154, 136, 204, 0.22);
+  --ch-col-unsched-bg: rgba(62, 48, 36, 0.55);
+  --ch-col-unsched-head: rgba(224, 160, 82, 0.22);
+  --ch-sticky-paper: #2e2c24;
+  --ch-sticky-border: rgba(212, 188, 134, 0.24);
+  --ch-important-paper: #342527;
+  --ch-important-border: rgba(226, 120, 120, 0.34);
+  --ch-important-accent: #e5837f;
+  --ch-important-pin-top: #cf6e68;
+  --ch-important-pin-bot: #9d4540;
+  --ch-rope: #8f7452;
+}
+
+.ch-root *, .ch-root *::before, .ch-root *::after {
+  box-sizing: border-box;
+}
+
+.ch-bg-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-size: cover;
+  background-position: center;
+  opacity: var(--ch-bg-opacity);
+}
+
+.ch-bg-layer.is-image-blur {
+  filter: blur(var(--ch-bg-blur));
+  transform: scale(1.03);
+}
+
+.ch-bg-layer.is-default {
+  background:
+    radial-gradient(circle at 12% 14%, rgba(162, 206, 134, 0.34), transparent 44%),
+    radial-gradient(circle at 88% 18%, rgba(143, 198, 222, 0.26), transparent 42%),
+    radial-gradient(circle at 54% 88%, rgba(235, 197, 148, 0.22), transparent 48%);
+}
+
+.theme-dark .ch-bg-layer.is-default {
+  background:
+    radial-gradient(circle at 12% 14%, rgba(111, 143, 91, 0.22), transparent 44%),
+    radial-gradient(circle at 88% 18%, rgba(75, 135, 168, 0.18), transparent 42%),
+    radial-gradient(circle at 54% 88%, rgba(176, 128, 72, 0.14), transparent 48%);
+}
+
+.ch-scroll {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
+}
+
+.ch-root.ch-glass .ch-badge-pill,
+.ch-root.ch-glass .ch-folded-rope-btn,
+.ch-root.ch-glass .ch-search-box,
+.ch-root.ch-glass .ch-new-note-btn,
+.ch-root.ch-glass .ch-quick-tile,
+.ch-root.ch-glass .ch-spiral-shell,
+.ch-root.ch-glass .ch-focus-pill,
+.ch-root.ch-glass .ch-card {
+  backdrop-filter: blur(var(--ch-card-blur));
+  -webkit-backdrop-filter: blur(var(--ch-card-blur));
+}
+
+.ch-inner {
+  position: relative;
+  max-width: 1580px;
+  margin: 0 auto;
+  padding: 14px 22px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ch-slot-sticky,
+.ch-slot-journal,
+.ch-slot-tasks,
+.ch-slot-gantt,
+.ch-focus-slot,
+.ch-hero-slot {
+  min-width: 0;
+}
+
+.ch-slot-header,
+.ch-slot-compact,
+.ch-left-slot {
+  display: contents;
+}
+
+.ch-util-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.ch-util-left, .ch-util-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ch-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--ch-surface);
+  border: 1px solid var(--ch-border);
+  color: var(--ch-text-muted);
+}
+
+.ch-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface);
+  color: var(--ch-text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.ch-icon-btn:hover {
+  color: var(--ch-text);
+  border-color: var(--ch-accent);
+  background: var(--ch-accent-soft);
+}
+
+.ch-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* ---- 响应式控制 ---- */
+.ch-compact-bar {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ch-root.ch-compact .ch-header {
+  grid-template-columns: 1fr;
+}
+
+.ch-root.ch-compact .ch-sticky-zone,
+.ch-root.ch-compact .ch-focus-zone {
+  display: none;
+}
+
+.ch-root.ch-compact .ch-compact-bar {
+  display: flex;
+}
+
+/* ---- 主体双栏网格 ---- */
+.ch-main-grid {
+  display: grid;
+  grid-template-columns: minmax(225px, 21%) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.ch-root.ch-narrow .ch-main-grid,
+.ch-root.ch-compact .ch-main-grid {
+  grid-template-columns: 1fr;
+}
+
+.ch-left-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ch-root.ch-narrow .ch-left-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ch-root.ch-compact .ch-left-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-right-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* ---- 通用玻璃卡片 ---- */
+.ch-card {
+  background: var(--ch-surface);
+  border: 1px solid var(--ch-border);
+  border-radius: var(--ch-card-radius);
+  box-shadow: var(--ch-shadow);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ch-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ch-card-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ch-card-accent-bar {
+  width: 3px;
+  height: 14px;
+  border-radius: 99px;
+  background: var(--ch-accent);
+  flex-shrink: 0;
+}
+
+.ch-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ch-text);
+  margin: 0;
+}
+
+.ch-count-muted {
+  font-size: 11.5px;
+  color: var(--ch-text-faint);
+  font-weight: 500;
+}
+
+/* ---- 原生 MarkdownRenderer 紧凑排版与主题继承 ---- */
+.ch-md-inline {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ch-md-inline p {
+  margin: 0;
+}
+
+.ch-md-inline p + p {
+  margin-top: 4px;
+}
+
+.ch-md-inline ul,
+.ch-md-inline ol {
+  margin: 2px 0;
+  padding-left: 18px;
+}
+
+.ch-md-inline strong {
+  font-weight: 700;
+}
+
+.ch-md-inline code {
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.ch-md-inline a.tag {
+  font-size: 0.88em;
+  line-height: 1.3;
+  padding: 1px 6px;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+
+.ch-md-inline img {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.ch-md-inline .internal-embed {
+  max-height: 240px;
+  overflow: auto;
+}

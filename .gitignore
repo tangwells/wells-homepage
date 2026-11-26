@@ -1,0 +1,17 @@
+# Obsidian plugin runtime state and user preferences.
+/data.json
+
+# OS / editor / transient files.
+.DS_Store
+**/.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+*.swp
+*.tmp
+*~
+__pycache__/
+*.pyc
+node_modules/
+coverage/

@@ -1,0 +1,9 @@
+{
+  "id": "carrot-home",
+  "name": "Carrot Home 工作台",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "独立原生单页工作台：随手晾晾闪念、日注正在做/螺旋日程联动、时钟日历书签最近笔记、今日执行任务工作区与项目甘特图",
+  "author": "custom",
+  "isDesktopOnly": false
+}

@@ -1,0 +1,667 @@
+/* ---- 顶层全宽：随手晾晾（固定要事 + 轮换闪念） ---- */
+.ch-sticky-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.ch-sticky-rope-wrap {
+  position: relative;
+  padding-top: 12px;
+}
+
+.ch-sticky-rope-svg {
+  position: absolute;
+  top: 0;
+  left: -4px;
+  right: -4px;
+  width: calc(100% + 8px);
+  height: 22px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ch-sticky-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.ch-root.ch-medium .ch-sticky-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ch-root.ch-narrow .ch-sticky-cards {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ch-sticky-card {
+  position: relative;
+  background: var(--ch-sticky-paper);
+  border: 1px solid var(--ch-sticky-border);
+  border-radius: 10px;
+  padding: 14px 10px 10px;
+  min-height: 102px;
+  max-height: 120px;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.ch-sticky-card:nth-child(odd) { transform: rotate(-0.7deg); }
+.ch-sticky-card:nth-child(even) { transform: rotate(0.7deg); }
+.ch-sticky-card:hover {
+  transform: translateY(-2px) rotate(0deg);
+  border-color: var(--ch-accent);
+}
+
+.ch-sticky-card.is-important {
+  background: var(--ch-important-paper);
+  border-color: var(--ch-important-border);
+}
+
+.ch-sticky-card.is-important:hover {
+  border-color: var(--ch-important-accent);
+}
+
+.ch-clothespin {
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  width: 10px;
+  height: 20px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #d7b384 0%, #b48854 100%);
+  border: 1px solid rgba(110, 78, 42, 0.45);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.ch-sticky-card.is-important .ch-clothespin {
+  background: linear-gradient(180deg, var(--ch-important-pin-top) 0%, var(--ch-important-pin-bot) 100%);
+  border-color: rgba(125, 42, 38, 0.48);
+}
+
+.ch-sticky-card:nth-child(odd) .ch-clothespin {
+  transform: translateX(-50%) rotate(-7deg);
+}
+
+.ch-sticky-card:nth-child(even) .ch-clothespin {
+  transform: translateX(-50%) rotate(7deg);
+}
+
+.ch-sticky-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--ch-text-faint);
+  font-weight: 600;
+}
+
+.ch-sticky-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ch-sticky-kind-tag.is-important {
+  color: var(--ch-important-accent);
+  font-weight: 700;
+}
+
+.ch-sticky-done-btn {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--ch-important-border);
+  background: transparent;
+  color: var(--ch-important-accent);
+  font-size: 10px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+
+.ch-sticky-done-btn:hover {
+  background: var(--ch-important-accent);
+  border-color: var(--ch-important-accent);
+  color: #fff;
+}
+
+/* ---- 螺旋日志与工作台两栏头部（与下方主体双栏列宽严格对齐） ---- */
+.ch-header {
+  display: grid;
+  grid-template-columns: minmax(225px, 21%) minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.ch-header.no-spiral {
+  grid-template-columns: 1fr;
+}
+
+.ch-root.ch-medium .ch-header {
+  grid-template-columns: minmax(225px, 21%) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.ch-root.ch-narrow .ch-header {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.ch-sticky-card-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ch-text);
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.ch-sticky-card-body::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  background: linear-gradient(180deg, transparent, var(--ch-sticky-paper));
+  pointer-events: none;
+}
+
+.ch-sticky-card.is-important .ch-sticky-card-body::after {
+  background: linear-gradient(180deg, transparent, var(--ch-important-paper));
+}
+
+.ch-sticky-card-body.ch-md-inline p {
+  margin: 0;
+  display: inline;
+}
+
+.ch-sticky-card-body.ch-md-inline img {
+  max-height: 56px;
+}
+
+.ch-sticky-fold-btn {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface-solid);
+  color: var(--ch-text-muted);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+}
+
+.ch-sticky-fold-btn:hover {
+  color: var(--ch-accent-strong);
+  border-color: var(--ch-accent);
+}
+
+.ch-sticky-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ch-text-muted);
+}
+
+.ch-text-btn {
+  background: transparent;
+  border: none;
+  color: var(--ch-text-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ch-text-btn:hover {
+  background: var(--ch-accent-soft);
+  color: var(--ch-accent-strong);
+}
+
+.ch-folded-rope-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--ch-surface);
+  border: 1px dashed var(--ch-rope);
+  color: var(--ch-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.ch-folded-rope-btn:hover {
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
+}
+
+/* ---- 右栏顶部：标题 + 搜索 + 快捷图标（在日注正中上方水平居中） ---- */
+.ch-hero-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-top: 6px;
+  min-width: 0;
+}
+
+.ch-title {
+  margin: 0;
+  font-size: clamp(24px, 3vw, 38px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--ch-text);
+  text-align: center;
+  line-height: 1.18;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+.ch-search-row {
+  position: relative;
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ch-search-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--ch-surface);
+  border: 1px solid var(--ch-border);
+  border-radius: 12px;
+  padding: 6px 10px 6px 12px;
+  box-shadow: var(--ch-shadow);
+  transition: border-color 0.15s;
+}
+
+.ch-search-box:focus-within {
+  border-color: var(--ch-accent);
+}
+
+.ch-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
+  font-size: 13.5px;
+  color: var(--ch-text);
+  padding: 2px 0;
+}
+
+.ch-mode-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface-subtle);
+  color: var(--ch-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ch-mode-chip.is-cmd {
+  background: var(--ch-accent-soft);
+  color: var(--ch-accent-strong);
+  border-color: var(--ch-accent);
+}
+
+.ch-new-note-btn {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 11px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface);
+  color: var(--ch-text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ch-new-note-btn:hover {
+  background: var(--ch-accent);
+  color: #fff;
+  border-color: var(--ch-accent);
+}
+
+.ch-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--ch-surface-solid);
+  border: 1px solid var(--ch-border);
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.ch-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.ch-search-item:hover, .ch-search-item.is-selected {
+  background: var(--ch-accent-soft);
+}
+
+.ch-search-item-sub {
+  font-size: 11px;
+  color: var(--ch-text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 42%;
+}
+
+.ch-quick-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  padding: 2px 4px;
+}
+
+.ch-quick-tile {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  border-radius: 10px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface);
+  color: var(--ch-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.04);
+  transition: transform 0.14s, border-color 0.14s, color 0.14s;
+}
+
+.ch-quick-tile:hover {
+  transform: translateY(-2px);
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
+}
+
+.ch-quick-tile svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---- 左栏顶部：嵌入 Nautilus Spiral 螺旋日程图（在晚上好正中上方水平居中） ---- */
+.ch-focus-zone {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 0;
+  position: relative;
+  z-index: 6;
+}
+
+.ch-spiral-shell {
+  position: relative;
+  width: 244px;
+  max-width: 100%;
+  border-radius: var(--ch-card-radius);
+  padding: 4px 6px 6px;
+  box-sizing: border-box;
+  background: transparent;
+  overflow: visible;
+}
+
+.ch-root.ch-glass .ch-spiral-shell {
+  background: var(--ch-surface);
+  border: 1px solid var(--ch-border);
+  box-shadow: var(--ch-shadow);
+}
+
+.ch-root.ch-medium .ch-spiral-shell {
+  width: 220px;
+}
+
+.ch-root.ch-narrow .ch-spiral-shell {
+  width: 220px;
+}
+
+.ch-spiral-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  min-height: 22px;
+  margin-bottom: 2px;
+}
+
+.ch-spiral-date-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.ch-spiral-date-chip {
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface);
+  color: var(--ch-text-muted);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+
+.ch-spiral-date-chip:hover {
+  color: var(--ch-accent-strong);
+  border-color: var(--ch-accent);
+  background: var(--ch-accent-soft);
+}
+
+.ch-spiral-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ch-spiral-mini-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--ch-border);
+  background: var(--ch-surface-solid);
+  color: var(--ch-text-muted);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.68;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.14s, border-color 0.14s, color 0.14s;
+}
+
+.ch-spiral-mini-btn:hover {
+  opacity: 1;
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
+}
+
+.ch-spiral-mini-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.ch-naut-container {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+.ch-naut-dummy-head {
+  display: none;
+}
+
+.ch-spiral-shell .naut-root {
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.ch-spiral-shell .naut-head,
+.ch-spiral-shell .naut-cap,
+.ch-spiral-shell .naut-pomo,
+.ch-spiral-shell .naut-list {
+  display: none !important;
+}
+
+.ch-spiral-shell .naut-hover {
+  margin: 0 0 2px;
+  height: 20px;
+  line-height: 20px;
+  font-size: 11px;
+  padding: 0 2px;
+  justify-content: center;
+}
+
+.ch-spiral-shell .naut-ai-hover-card {
+  z-index: 40;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  left: 0;
+  right: auto;
+}
+
+.ch-spiral-shell .naut-svg {
+  width: 100%;
+  max-width: 236px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.ch-spiral-shell .naut-hour {
+  font-size: 9.2px;
+  opacity: 0.85;
+}
+
+.ch-spiral-shell .naut-empty {
+  margin: 0;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 10px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ch-text-muted);
+}
+
+.ch-spiral-empty-action {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.ch-spiral-status {
+  min-height: 150px;
+  border: 1px dashed var(--ch-border);
+  border-radius: var(--ch-card-radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--ch-text-muted);
+  text-align: center;
+}
+
+.ch-focus-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ch-accent-strong);
+  letter-spacing: 0.03em;
+}
+
+.ch-focus-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--ch-surface);
+  border: 1px solid var(--ch-border);
+  box-shadow: var(--ch-shadow);
+  cursor: pointer;
+  font-size: 12px;
+  max-width: 220px;
+}
+
+.ch-focus-pill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}

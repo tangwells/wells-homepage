@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+"$HOOK_DIR/check-worktree-location.sh"
+
 ROOT=$(git rev-parse --show-toplevel)
 if ! /usr/bin/python3 "$ROOT/scripts/build.py" --check; then
   if [ "${CARROT_HOME_AUTO_SYNC:-0}" = "1" ]; then

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+HOOK_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+"$HOOK_DIR/check-worktree-location.sh"

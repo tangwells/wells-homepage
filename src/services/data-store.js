@@ -1,7 +1,7 @@
 'use strict';
 
 const { formatDateYMD, getPeriodTitleByHour, pickDefaultJournalPeriod } = require('../utils/date');
-const { flattenObsidianBookmarks } = require('../utils/dom');
+const { getBookmarksPlugin, buildBookmarkTree } = require('./bookmarks-adapter');
 const { scanMarkdownTasks } = require('../parsers/markdown');
 const { parseDailyActiveStatus, parseDailyJournalTimeline } = require('../parsers/journal');
 const { parseExecutionTasksFromDaily } = require('../parsers/execution');
@@ -65,7 +65,10 @@ class VaultDataStore {
       selectedDate: '',
       dailyFilesSet: new Set(),
       recentNotes: [],
-      obsidianBookmarks: [],
+      bookmarksEnabled: true,
+      bookmarkTree: [],
+      bookmarkGroups: [],
+      bookmarkCollapsed: new Set(),
       projects: [],
       execTasks: [],
       execQuickScope: 'focus', // focus | today | overdue | open | done
@@ -226,9 +229,25 @@ class VaultDataStore {
     this._syncIdeaBatchOrder(allIdeas);
   }
 
-  _refreshBookmarks() {
-    const bmItems = this.app.internalPlugins?.plugins?.bookmarks?.instance?.items || [];
-    this.state.obsidianBookmarks = flattenObsidianBookmarks(bmItems, []);
+  refreshBookmarks() {
+    const plugin = getBookmarksPlugin(this.app);
+    const tree = buildBookmarkTree(this.app, plugin);
+    this.state.bookmarksEnabled = tree.enabled;
+    this.state.bookmarkTree = tree.items;
+    this.state.bookmarkGroups = tree.groups;
+    return tree;
+  }
+
+  hasBookmarkForPath(targetPath) {
+    if (!targetPath) return false;
+    const walk = (nodes) => {
+      for (const n of nodes) {
+        if (n.path === targetPath) return true;
+        if (n.children && n.children.length > 0 && walk(n.children)) return true;
+      }
+      return false;
+    };
+    return walk(this.state.bookmarkTree || []);
   }
 
   async loadAll() {
@@ -272,7 +291,7 @@ class VaultDataStore {
     }
     this._aggregateLogsFromCache(todayPath);
     this._buildRecentNotes();
-    this._refreshBookmarks();
+    this.refreshBookmarks();
 
     const journalPath = `06_日志/${this.state.journalDate}.md`;
     const cachedJournalEntry = this.logCache.get(journalPath);

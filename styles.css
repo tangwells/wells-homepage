@@ -1107,10 +1107,15 @@
   cursor: pointer;
 }
 
-.ch-mini-pill-btn:hover, .ch-mini-pill-btn.is-active {
+.ch-mini-pill-btn:hover:not(:disabled), .ch-mini-pill-btn.is-active {
   border-color: var(--ch-accent);
   color: var(--ch-accent-strong);
   background: var(--ch-accent-soft);
+}
+
+.ch-mini-pill-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ch-seg-tabs {
@@ -1288,6 +1293,43 @@
   color: var(--ch-text-faint);
   margin-top: 2px;
   padding: 0 4px;
+}
+
+.ch-bm-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ch-bm-group-row {
+  font-weight: 600;
+}
+
+.ch-bm-chevron {
+  width: 11px;
+  font-size: 10px;
+  color: var(--ch-text-faint);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ch-bm-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ch-bm-item-row.is-broken .ch-list-row-text {
+  color: var(--ch-text-faint);
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
+.ch-bm-item-row.is-broken .ch-bm-icon {
+  opacity: 0.55;
+}
+
+.ch-bm-disabled {
+  padding: 12px 6px;
 }
 
 /* ---- 30-journal.css ---- */
@@ -2478,6 +2520,25 @@
 
 .ch-btn.is-primary:hover {
   background: #587646;
+}
+
+.ch-btn.is-danger {
+  background: var(--ch-danger, #c44a42);
+  border-color: var(--ch-danger, #c44a42);
+  color: #fff;
+}
+
+.ch-btn.is-danger:hover {
+  filter: brightness(0.92);
+}
+
+.ch-bm-modal-error {
+  font-size: 12px;
+  color: var(--ch-danger, #c44a42);
+  background: rgba(196, 74, 66, 0.1);
+  border: 1px solid rgba(196, 74, 66, 0.25);
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 .ch-settings-row {

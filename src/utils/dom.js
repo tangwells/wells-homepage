@@ -47,31 +47,6 @@ function renderTokensInto(container, tokens, app) {
   }
 }
 
-function flattenObsidianBookmarks(items, out = []) {
-  if (!Array.isArray(items)) return out;
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.type === 'group' && Array.isArray(item.items)) {
-      flattenObsidianBookmarks(item.items, out);
-    } else if (item.type === 'file' || item.path) {
-      out.push({
-        type: item.type || 'file',
-        title: item.title || String(item.path || '').replace(/^.*\//, '').replace(/\.md$/, ''),
-        path: item.path,
-        subpath: item.subpath || '',
-        query: item.query || '',
-      });
-    } else if (item.type === 'search' && item.query) {
-      out.push({
-        type: 'search',
-        title: item.title || item.query,
-        query: item.query,
-      });
-    }
-  }
-  return out;
-}
-
 /**
  * 局部重绘兜底：保留外层滚动容器 scrollTop，防止浏览器因瞬时高度收缩将 scrollTop 重置为 0。
  */
@@ -91,6 +66,5 @@ module.exports = {
   el,
   setIconSafe,
   renderTokensInto,
-  flattenObsidianBookmarks,
   preserveScroll,
 };

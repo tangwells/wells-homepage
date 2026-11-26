@@ -505,11 +505,13 @@ function createMockObsidianClasses() {
 
 function createMockApp(initialFiles) {
   const filesMap = new Map();
+  const foldersMap = new Map();
   let cachedReadCount = 0;
   const emitters = {
     vault: new Map(),
     workspace: new Map(),
     metadataCache: new Map(),
+    bookmarks: new Map(),
   };
 
   function makeEventTarget(bucket) {
@@ -535,9 +537,30 @@ function createMockApp(initialFiles) {
   const vaultEvents = makeEventTarget(emitters.vault);
   const wsEvents = makeEventTarget(emitters.workspace);
   const mcEvents = makeEventTarget(emitters.metadataCache);
+  const bmEvents = makeEventTarget(emitters.bookmarks);
+
+  function addOrUpdateFolder(folderPath) {
+    const cleaned = String(folderPath || '').replace(/\/+$/, '');
+    if (!cleaned || cleaned === '/') return null;
+    const parts = cleaned.split('/');
+    let cur = '';
+    let last = null;
+    for (const seg of parts) {
+      if (!seg) continue;
+      cur = cur ? `${cur}/${seg}` : seg;
+      if (!foldersMap.has(cur)) {
+        foldersMap.set(cur, { path: cur, name: seg, children: [] });
+      }
+      last = foldersMap.get(cur);
+    }
+    return last;
+  }
 
   function addOrUpdateFile(filePath, content, mtime = 1000) {
-    const basename = path.basename(filePath, '.md');
+    const basename = path.basename(filePath, path.extname(filePath));
+    const name = path.basename(filePath);
+    const dir = path.posix.dirname(filePath);
+    if (dir && dir !== '.') addOrUpdateFolder(dir);
     const existing = filesMap.get(filePath);
     if (existing) {
       existing._content = content;
@@ -546,6 +569,7 @@ function createMockApp(initialFiles) {
     }
     const f = {
       path: filePath,
+      name,
       basename,
       stat: { mtime },
       _content: content,
@@ -562,25 +586,86 @@ function createMockApp(initialFiles) {
   const leaves = [];
   const openLinkTextCalls = [];
   const openFileCalls = [];
+  const openBookmarkCalls = [];
   const hoverLinkEvents = [];
   const globalSearchQueries = [];
+
+  function removeBookmarkFromList(list, target) {
+    if (!Array.isArray(list)) return false;
+    const idx = list.indexOf(target);
+    if (idx !== -1) {
+      list.splice(idx, 1);
+      return true;
+    }
+    for (const item of list) {
+      if (item && item.type === 'group' && removeBookmarkFromList(item.items, target)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const bookmarksInstance = {
+    items: [],
+    on: bmEvents.on,
+    offref: bmEvents.offref,
+    trigger: bmEvents.trigger,
+    getItemTitle(item) {
+      if (item.title) return item.title;
+      if (item.type === 'file') {
+        const base = String(item.path || '').replace(/^.*\//, '').replace(/\.md$/i, '');
+        return base + (item.subpath || '');
+      }
+      if (item.type === 'folder') {
+        return String(item.path || '').replace(/^.*\//, '');
+      }
+      if (item.type === 'search') return item.query || '';
+      return '';
+    },
+    addItem(item, parentGroup) {
+      if (parentGroup && Array.isArray(parentGroup.items)) {
+        parentGroup.items.push(item);
+      } else {
+        bookmarksInstance.items.push(item);
+      }
+      bmEvents.trigger('changed');
+    },
+    removeItem(item) {
+      if (removeBookmarkFromList(bookmarksInstance.items, item)) {
+        bmEvents.trigger('changed');
+      }
+    },
+    openBookmark(item, newLeaf) {
+      openBookmarkCalls.push({ item, newLeaf });
+    },
+  };
+
+  const bookmarksEntry = {
+    enabled: true,
+    instance: bookmarksInstance,
+  };
 
   const app = {
     _viewCreators: new Map(),
     _pluginData: {},
     _filesMap: filesMap,
+    _foldersMap: foldersMap,
     _addOrUpdateFile: addOrUpdateFile,
+    _addOrUpdateFolder: addOrUpdateFolder,
     _getCachedReadCount: () => cachedReadCount,
     _resetCachedReadCount: () => { cachedReadCount = 0; },
     _openLinkTextCalls: openLinkTextCalls,
     _openFileCalls: openFileCalls,
+    _openBookmarkCalls: openBookmarkCalls,
     _hoverLinkEvents: hoverLinkEvents,
     _globalSearchQueries: globalSearchQueries,
+    _getBookmarkListenerCount: () => (emitters.bookmarks.get('changed')?.size || 0),
     vault: {
       getName: () => 'TestVault',
       getMarkdownFiles: () => Array.from(filesMap.values()).filter((f) => f.path.endsWith('.md')),
       getFiles: () => Array.from(filesMap.values()),
-      getAbstractFileByPath: (p) => filesMap.get(p) || null,
+      getAllLoadedFiles: () => [...foldersMap.values(), ...filesMap.values()],
+      getAbstractFileByPath: (p) => filesMap.get(p) || foldersMap.get(p) || null,
       cachedRead: async (file) => {
         cachedReadCount++;
         return file._content;
@@ -596,7 +681,13 @@ function createMockApp(initialFiles) {
         vaultEvents.trigger('create', f);
         return f;
       },
-      createFolder: async () => {},
+      delete: async (f) => {
+        if (!f || !f.path) return;
+        filesMap.delete(f.path);
+        foldersMap.delete(f.path);
+        vaultEvents.trigger('delete', f);
+      },
+      createFolder: async (p) => addOrUpdateFolder(p),
       on: vaultEvents.on,
       offref: vaultEvents.offref,
       trigger: vaultEvents.trigger,
@@ -651,8 +742,12 @@ function createMockApp(initialFiles) {
       enabledPlugins: new Set(),
     },
     internalPlugins: {
+      getEnabledPluginById: (id) => {
+        if (id === 'bookmarks') return bookmarksEntry.enabled ? bookmarksEntry.instance : null;
+        return app.internalPlugins.plugins[id]?.instance || null;
+      },
       plugins: {
-        bookmarks: { instance: { items: [] } },
+        bookmarks: bookmarksEntry,
         'global-search': {
           instance: {
             openGlobalSearch: (q) => globalSearchQueries.push(q),
@@ -706,11 +801,67 @@ function testParsersAndUtils() {
   assert.strictEqual(formatDateYMD(parseYMD('2026-11-26')), '2026-11-26');
   assert.ok(renderTemplateText('{{title}} {{weekStart}}..{{weekEnd}}', 'weekly', '2026-09-06').startsWith('2026W36'));
 
-  // 设置规范化
-  const norm = normalizeSettings({ cardBlur: 10, ganttZoom: 'invalid', openOnStartup: false });
+  // 设置规范化（并静默忽略遗留 pinnedEntries）
+  const norm = normalizeSettings({ cardBlur: 10, ganttZoom: 'invalid', openOnStartup: false, pinnedEntries: [{ id: 'old' }] });
   assert.strictEqual(norm.cardBlur, 10);
   assert.strictEqual(norm.ganttZoom, 'month');
   assert.strictEqual(norm.openOnStartup, false);
+  assert.strictEqual('pinnedEntries' in norm, false, '应忽略遗留 pinnedEntries 字段');
+
+  // 书签适配层单元测试
+  const {
+    getBookmarksPlugin,
+    buildBookmarkTree,
+    addVaultBookmark,
+    listVaultBookmarkTargets,
+  } = require('../src/services/bookmarks-adapter');
+  const bmApp = createMockApp({
+    '07_Resource/doc.md': '# 文档',
+    '01_附件/spec.pdf': 'pdf',
+    '.trash/ignored.md': 'ignored',
+    '.obsidian/workspace.json': '{}',
+  });
+  bmApp._addOrUpdateFolder('05_Study/空目录');
+
+  const bmTargets = listVaultBookmarkTargets(bmApp);
+  assert.ok(bmTargets.some((t) => t.type === 'file' && t.path === '01_附件/spec.pdf'), '应支持任意类型文件');
+  assert.ok(bmTargets.some((t) => t.type === 'folder' && t.path === '05_Study/空目录'), '应包含非根空目录');
+  assert.ok(!bmTargets.some((t) => t.path.startsWith('.trash/') || t.path.startsWith('.obsidian/')), '应排除 .trash 与 .obsidian');
+
+  const bmPlugin = getBookmarksPlugin(bmApp);
+  const subGroup = { type: 'group', title: '子组', items: [{ type: 'file', path: '07_Resource/doc.md', subpath: '#小节' }] };
+  bmPlugin.items.push(
+    { type: 'group', title: '工作', items: [subGroup, { type: 'url', title: '官网', url: 'https://example.com' }] },
+    { type: 'folder', path: '05_Study/空目录' },
+    { type: 'search', query: 'tag:#重点' },
+    { type: 'graph', title: '全局图谱', options: {} },
+    { type: 'file', path: 'missing/deleted.md' }
+  );
+  for (let k = 0; k < 14; k++) {
+    bmPlugin.items.push({ type: 'file', path: `07_Resource/note-${k}.md`, title: `条目${k}` });
+  }
+  bmPlugin.items.push({ type: 'file', path: '07_Resource/doc.md', subpath: '#top' });
+  const tree = buildBookmarkTree(bmApp, bmPlugin);
+  assert.strictEqual(tree.enabled, true);
+  assert.strictEqual(tree.items.length, 20, '不得截断超过 12 条书签');
+  assert.strictEqual(tree.groups.length, 2);
+  assert.strictEqual(tree.groups[1].label, '工作 / 子组');
+  assert.strictEqual(tree.items[0].leafCount, 2);
+  assert.strictEqual(tree.items[0].groupCount, 1);
+  assert.strictEqual(tree.items[4].broken, true, '缺失文件应标为 broken');
+
+  const addRes1 = addVaultBookmark(bmApp, null, { type: 'file', path: '07_Resource/doc.md', title: '' });
+  assert.strictEqual(addRes1.ok, true);
+  assert.strictEqual('title' in addRes1.item, false, '留空标题不应写入 title 字段');
+  const dupRes = addVaultBookmark(bmApp, null, { type: 'file', path: '07_Resource/doc.md' });
+  assert.strictEqual(dupRes.ok, false);
+  assert.strictEqual(dupRes.reason, 'duplicate', '同组重复路径应被阻止');
+  const crossGroupRes = addVaultBookmark(bmApp, null, { type: 'file', path: '07_Resource/doc.md', parentGroupRaw: subGroup });
+  assert.strictEqual(crossGroupRes.ok, true, '不同分组（且原条目带 subpath）允许共存');
+
+  bmApp.internalPlugins.plugins.bookmarks.enabled = false;
+  assert.strictEqual(getBookmarksPlugin(bmApp), null, '禁用书签核心插件应返回 null');
+  assert.strictEqual(buildBookmarkTree(bmApp, null).enabled, false);
 
   // Frontmatter & LineFlags (Agent Deck 隔离)
   const sampleDaily = [
@@ -951,7 +1102,33 @@ async function testBundledPluginAndScrollPreservation() {
       '## 晚上',
       '- **19:00** 晚上测试条目',
     ].join('\n'),
+    '07_Resource/手册.pdf': 'pdf-binary',
   });
+  app._addOrUpdateFolder('05_Study/专题');
+
+  const subProjGroup = {
+    type: 'group',
+    title: '项目子组',
+    items: [{ type: 'file', path: '04_Project/P1.md', title: '核心项目笔记' }],
+  };
+  const workGroup = {
+    type: 'group',
+    title: '工作区',
+    items: [subProjGroup, { type: 'url', title: '外部参考', url: 'https://obsidian.md' }],
+  };
+  const emptyGroup = { type: 'group', title: '空分组', items: [] };
+  const bmInst = app.internalPlugins.plugins.bookmarks.instance;
+  bmInst.items.push(
+    workGroup,
+    emptyGroup,
+    { type: 'folder', path: '05_Study/专题' },
+    { type: 'search', query: 'tag:#工作流' },
+    { type: 'graph', title: '图谱视图', options: {} },
+    { type: 'file', path: 'missing/gone.md' }
+  );
+  for (let i = 0; i < 10; i++) {
+    bmInst.items.push({ type: 'file', path: '04_Project/P1.md', subpath: `#H${i}`, title: `锚点${i}` });
+  }
 
   const plugin = new CarrotHomePlugin(app, { id: 'carrot-home' });
   await plugin.onload();
@@ -1121,12 +1298,125 @@ async function testBundledPluginAndScrollPreservation() {
   await view.refreshPaths([`06_日志/${todayYmd}.md`]);
   assertScrollIntact('后台刷新日志文件');
 
-  // 7) 清理与卸载：确认所有 Component 实例均已 unload
+  // 6.5) 书签完整树形同步、增删、打开与降级恢复验证
+  const bmList = view.contentEl.querySelector('.ch-bm-list');
+  assert.ok(bmList, '应渲染 .ch-bm-list 书签列表');
+  const allGroupRows = view.contentEl.querySelectorAll('.ch-bm-group-row');
+  const allItemRows = view.contentEl.querySelectorAll('.ch-bm-item-row');
+  assert.strictEqual(allGroupRows.length, 3, '应渲染所有 3 个分组（含嵌套子分组）');
+  assert.strictEqual(allItemRows.length, 16, '应完整渲染全部 16 条叶子书签，不得截断为 12 条');
+
+  // 折叠与展开分组，保持外层 scrollTop
+  const workGroupRow = allGroupRows.find((r) => r.textContent.includes('工作区'));
+  assert.ok(workGroupRow);
+  workGroupRow.click();
+  assertScrollIntact('书签分组折叠');
+  assert.strictEqual(view.contentEl.querySelectorAll('.ch-bm-group-row').length, 2, '折叠工作区后应隐藏子分组');
+  assert.strictEqual(view.contentEl.querySelectorAll('.ch-bm-item-row').length, 14, '折叠工作区后应隐藏其下 2 条叶子书签');
+  view.contentEl.querySelectorAll('.ch-bm-group-row').find((r) => r.textContent.includes('工作区')).click();
+  assertScrollIntact('书签分组展开');
+  assert.strictEqual(view.contentEl.querySelectorAll('.ch-bm-item-row').length, 16, '展开工作区后应恢复展示');
+
+  // 单击、Cmd/Ctrl+单击、中键打开书签
+  const searchRow = view.contentEl.querySelectorAll('.ch-bm-item-row').find((r) => r.textContent.includes('tag:#工作流'));
+  assert.ok(searchRow, '应渲染搜索书签');
+  searchRow.click();
+  searchRow.click({ metaKey: true });
+  searchRow.dispatchEvent({ type: 'auxclick', button: 1, target: searchRow });
+  assert.strictEqual(app._openBookmarkCalls.length, 3, '应记录 3 次 openBookmark 调用');
+  assert.strictEqual(app._openBookmarkCalls[0].newLeaf, false);
+  assert.strictEqual(app._openBookmarkCalls[1].newLeaf, 'tab');
+  assert.strictEqual(app._openBookmarkCalls[2].newLeaf, 'tab');
+
+  // 失效书签检测与创建恢复、以及直接删除
+  const brokenRow = view.contentEl.querySelector('.ch-bm-item-row.is-broken');
+  assert.ok(brokenRow, '缺失文件应渲染 .is-broken');
+  assert.ok(brokenRow.title.includes('missing/gone.md'));
+  await app.vault.create('missing/gone.md', '# 已恢复');
+  assert.strictEqual(view.contentEl.querySelector('.ch-bm-item-row.is-broken'), null, '补建目标文件后应自动解除失效状态');
+  // 再次删除该文件使之失效，并测试点 × 直接移除
+  await app.vault.delete(app.vault.getAbstractFileByPath('missing/gone.md'));
+  const brokenRow2 = view.contentEl.querySelector('.ch-bm-item-row.is-broken');
+  assert.ok(brokenRow2, '删除目标文件后应恢复为失效状态');
+  brokenRow2.querySelector('.ch-list-row-del').click();
+  assert.strictEqual(bmInst.items.some((x) => x.path === 'missing/gone.md'), false, '点 × 应直接移除失效书签');
+
+  // 删除空分组直接移除；删除非空分组弹二次确认
+  const emptyGroupRow = view.contentEl.querySelectorAll('.ch-bm-group-row').find((r) => r.textContent.includes('空分组'));
+  emptyGroupRow.querySelector('.ch-list-row-del').click();
+  assert.strictEqual(mockDoc.body.querySelector('.ch-modal'), null, '空分组删除不应弹出二次确认');
+  assert.strictEqual(bmInst.items.includes(emptyGroup), false, '空分组应直接移除');
+
+  const workRowForDel = view.contentEl.querySelectorAll('.ch-bm-group-row').find((r) => r.textContent.includes('工作区'));
+  workRowForDel.querySelector('.ch-list-row-del').click();
+  const confirmModal = mockDoc.body.querySelector('.ch-modal');
+  assert.ok(confirmModal, '非空分组删除应弹出二次确认框');
+  assert.ok(confirmModal.textContent.includes('工作区') && confirmModal.textContent.includes('2 条书签'));
+  confirmModal.querySelector('.ch-btn.is-danger').click();
+  assert.strictEqual(mockDoc.body.querySelector('.ch-modal'), null, '确认删除后弹窗应关闭');
+  assert.strictEqual(bmInst.items.includes(workGroup), false, '确认后应从 Obsidian 书签移除该分组');
+
+  // + 添加弹窗：筛选、选分组、自定义/留空标题、同组防重
+  bmInst.addItem({ type: 'group', title: '新分组', items: [] });
+  const addBmBtn = view.contentEl.querySelector('.ch-card-head .ch-mini-pill-btn[title=""]') ||
+    view.contentEl.querySelectorAll('.ch-card').find((c) => c.querySelector('.ch-card-title')?.textContent === '书签').querySelector('.ch-mini-pill-btn');
+  assert.ok(addBmBtn && addBmBtn.textContent === '+ 添加');
+  addBmBtn.click();
+  const addModal = mockDoc.body.querySelector('.ch-modal');
+  assert.ok(addModal, '点击 + 添加应打开添加书签弹窗');
+  const filterInp = addModal.querySelector('.ch-input');
+  const selectEls = addModal.querySelectorAll('select.ch-select');
+  assert.strictEqual(selectEls.length, 2, '存在分组时应展示目标列表与所属分组两个下拉框');
+  const targetSel = selectEls[0];
+  const groupSel = selectEls[1];
+
+  // 切换到「文件」并筛选 pdf
+  addModal.querySelectorAll('.ch-seg-tab').find((b) => b.textContent === '文件').click();
+  filterInp.value = '手册';
+  filterInp.dispatchEvent({ type: 'input', target: filterInp });
+  assert.strictEqual(targetSel.value, 'file::07_Resource/手册.pdf');
+  groupSel.value = '0';
+  addModal.querySelector('.ch-btn.is-primary').click();
+  assert.strictEqual(mockDoc.body.querySelector('.ch-modal'), null, '添加成功后应关闭弹窗');
+  const newGroupRaw = bmInst.items.find((x) => x.type === 'group' && x.title === '新分组');
+  assert.strictEqual(newGroupRaw.items.length, 1);
+  assert.strictEqual(newGroupRaw.items[0].path, '07_Resource/手册.pdf');
+  assert.strictEqual('title' in newGroupRaw.items[0], false, '留空标题应沿用默认标题');
+
+  // 重复添加到同一分组应拦截且弹窗保持打开
+  addBmBtn.click();
+  const addModal2 = mockDoc.body.querySelector('.ch-modal');
+  const filterInp2 = addModal2.querySelector('.ch-input');
+  filterInp2.value = '手册';
+  filterInp2.dispatchEvent({ type: 'input', target: filterInp2 });
+  addModal2.querySelectorAll('select.ch-select')[1].value = '0';
+  addModal2.querySelector('.ch-btn.is-primary').click();
+  assert.ok(mockDoc.body.querySelector('.ch-modal'), '同组重复添加时弹窗不应关闭');
+  assert.ok(addModal2.querySelector('.ch-bm-modal-error')?.textContent.includes('已存在'), '应展示重复提示');
+  addModal2.querySelector('.ch-icon-btn').click();
+
+  // 外部变更实时同步 & 核心插件禁用/恢复降级
+  bmInst.addItem({ type: 'url', title: '外部新增URL', url: 'https://example.org' });
+  assert.ok(view.contentEl.querySelector('.ch-bm-list').textContent.includes('外部新增URL'), '外部触发 changed 应实时同步');
+
+  app.internalPlugins.plugins.bookmarks.enabled = false;
+  app.workspace.trigger('layout-change');
+  assert.ok(view.contentEl.querySelector('.ch-bm-disabled'), '核心插件禁用后应显示引导提示');
+  const disabledAddBtn = view.contentEl.querySelectorAll('.ch-card').find((c) => c.querySelector('.ch-card-title')?.textContent === '书签').querySelector('.ch-mini-pill-btn');
+  assert.strictEqual(disabledAddBtn.disabled, true, '核心插件禁用后 + 添加按钮应禁用');
+
+  app.internalPlugins.plugins.bookmarks.enabled = true;
+  app.workspace.trigger('layout-change');
+  assert.strictEqual(view.contentEl.querySelector('.ch-bm-disabled'), null, '重新启用后应自动恢复书签列表');
+
+  // 7) 清理与卸载：确认所有 Component 实例均已 unload 且 bookmarks 监听已解绑
+  assert.ok(app._getBookmarkListenerCount() > 0, '关闭前应绑定 bookmarks changed 监听');
   assert.ok(mockObsidian.Component.stats.loadedCount > 0, '应创建并加载过 Component 实例');
   assert.ok(mockObsidian.Component.stats.activeCount > 0, '关闭前应存在活跃 Component');
   await view.onClose();
   plugin.onunload();
   assert.strictEqual(view.isClosed, true);
+  assert.strictEqual(app._getBookmarkListenerCount(), 0, '关闭视图后必须解绑 bookmarks changed 监听');
   assert.strictEqual(mockObsidian.Component.stats.activeCount, 0, '关闭视图后所有 MarkdownRenderer Component 必须全部 unload');
 }
 

@@ -3,6 +3,7 @@
 const { DEFAULT_SETTINGS } = require('../constants');
 const { el } = require('../utils/dom');
 const { openFileAtLine, ensureFolderExists } = require('../services/vault-adapter');
+const { listVaultBookmarkTargets } = require('../services/bookmarks-adapter');
 
 function createModalManager(ctx) {
   let activeModalCleanup = null;
@@ -350,75 +351,185 @@ function createModalManager(ctx) {
     });
   }
 
-  function openAddPinModal() {
+  function openAddBookmarkModal() {
     const app = ctx.app;
-    const allFiles = (app.vault.getFiles ? app.vault.getFiles() : []).filter((f) =>
-      /\.(md|components|canvas|xdb)$/i.test(f.path)
-    );
-    showModal('添加常用入口', (body, close) => {
-      const fLabel = el('div', 'ch-form-field');
-      fLabel.appendChild(el('span', 'ch-form-label', '显示名称'));
-      const lblInput = el('input', 'ch-input');
-      lblInput.placeholder = '例如：我的研究主线';
-      fLabel.appendChild(lblInput);
-      body.appendChild(fLabel);
+    const targets = listVaultBookmarkTargets(app);
+    const groups = ctx.store?.state?.bookmarkGroups || [];
 
-      const fFile = el('div', 'ch-form-field');
-      fFile.appendChild(el('span', 'ch-form-label', '目标文件路径（输入筛选）'));
+    showModal('添加书签', (body, close) => {
+      let filterType = 'all';
+
+      const typeTabs = el('div', 'ch-seg-tabs');
+      const tabBtns = [];
+      for (const [kind, label] of [['all', '全部'], ['file', '文件'], ['folder', '文件夹']]) {
+        const b = el('button', `ch-seg-tab${kind === 'all' ? ' is-active' : ''}`, label);
+        b.addEventListener('click', () => {
+          filterType = kind;
+          for (const item of tabBtns) {
+            item.btn.classList.toggle('is-active', item.kind === kind);
+          }
+          refill(filterInput.value);
+        });
+        tabBtns.push({ kind, btn: b });
+        typeTabs.appendChild(b);
+      }
+      body.appendChild(typeTabs);
+
+      const fTarget = el('div', 'ch-form-field');
+      fTarget.appendChild(el('span', 'ch-form-label', '目标文件或文件夹（输入关键词筛选）'));
       const filterInput = el('input', 'ch-input');
-      filterInput.placeholder = '输入关键词过滤笔记或组件…';
+      filterInput.placeholder = '输入路径或名称筛选…';
       const sel = document.createElement('select');
       sel.className = 'ch-select';
       sel.size = 6;
-      sel.style.height = '140px';
+      sel.style.height = '150px';
       sel.style.padding = '4px';
 
+      const fTitle = el('div', 'ch-form-field');
+      fTitle.appendChild(el('span', 'ch-form-label', '自定义标题（可选）'));
+      const titleInput = el('input', 'ch-input');
+      titleInput.placeholder = '留空沿用 Obsidian 默认标题';
+
+      const targetByValue = new Map();
+      function syncTitlePlaceholder() {
+        const hit = targetByValue.get(sel.value);
+        titleInput.placeholder = hit ? `${hit.name}（留空沿用默认标题）` : '留空沿用 Obsidian 默认标题';
+      }
+
+      const errEl = el('div', 'ch-bm-modal-error', '');
+      errEl.style.display = 'none';
+      function clearErr() {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+
       function refill(kw) {
+        clearErr();
         sel.replaceChildren();
-        const q = kw.trim().toLowerCase();
-        const hits = allFiles.filter((f) => !q || f.path.toLowerCase().includes(q)).slice(0, 60);
-        for (const f of hits) {
+        targetByValue.clear();
+        const q = String(kw || '').trim().toLowerCase();
+        const hits = targets
+          .filter((t) => (filterType === 'all' || t.type === filterType) && (!q || t.path.toLowerCase().includes(q)))
+          .slice(0, 100);
+        for (const t of hits) {
+          const val = `${t.type}::${t.path}`;
+          targetByValue.set(val, t);
           const o = document.createElement('option');
-          o.value = f.path;
-          o.textContent = f.path;
+          o.value = val;
+          o.textContent = t.type === 'folder' ? `[文件夹] ${t.path}` : t.path;
           sel.appendChild(o);
         }
-        if (hits[0]) {
-          sel.value = hits[0].path;
-          if (!lblInput.value) lblInput.value = hits[0].basename;
-        }
+        sel.value = hits[0] ? `${hits[0].type}::${hits[0].path}` : '';
+        syncTitlePlaceholder();
       }
-      refill('');
+
       filterInput.addEventListener('input', () => refill(filterInput.value));
       sel.addEventListener('change', () => {
-        const p = sel.value;
-        if (p) lblInput.value = p.replace(/^.*\//, '').replace(/\.[^.]+$/, '');
+        clearErr();
+        syncTitlePlaceholder();
       });
+      refill('');
 
-      fFile.appendChild(filterInput);
-      fFile.appendChild(sel);
-      body.appendChild(fFile);
+      fTarget.appendChild(filterInput);
+      fTarget.appendChild(sel);
+      body.appendChild(fTarget);
+
+      let groupSel = null;
+      if (groups.length > 0) {
+        const fGroup = el('div', 'ch-form-field');
+        fGroup.appendChild(el('span', 'ch-form-label', '所属分组'));
+        groupSel = document.createElement('select');
+        groupSel.className = 'ch-select';
+        groupSel.style.height = '32px';
+        const rootOpt = document.createElement('option');
+        rootOpt.value = '';
+        rootOpt.textContent = '根目录';
+        groupSel.appendChild(rootOpt);
+        groups.forEach((g, idx) => {
+          const opt = document.createElement('option');
+          opt.value = String(idx);
+          opt.textContent = g.label;
+          groupSel.appendChild(opt);
+        });
+        groupSel.addEventListener('change', clearErr);
+        fGroup.appendChild(groupSel);
+        body.appendChild(fGroup);
+      }
+
+      fTitle.appendChild(titleInput);
+      body.appendChild(fTitle);
+      body.appendChild(errEl);
 
       const footer = el('div', 'ch-modal-footer');
       const cancelBtn = el('button', 'ch-btn', '取消');
       const addBtn = el('button', 'ch-btn is-primary', '添加到书签');
       cancelBtn.addEventListener('click', close);
-      addBtn.addEventListener('click', () => {
-        if (!sel.value) return;
-        const nextPins = ctx.getSettings().pinnedEntries.concat([
-          {
-            id: 'pin-' + Date.now(),
-            label: lblInput.value.trim() || sel.value.replace(/^.*\//, ''),
-            kind: 'file',
-            target: sel.value,
-            icon: 'file-text',
-          },
-        ]);
-        ctx.updateSettings({ pinnedEntries: nextPins });
+
+      const submit = () => {
+        if (!sel.value) {
+          errEl.textContent = '请先选择要添加的文件或文件夹';
+          errEl.style.display = '';
+          return;
+        }
+        const sepIdx = sel.value.indexOf('::');
+        const type = sepIdx >= 0 ? sel.value.slice(0, sepIdx) : 'file';
+        const targetPath = sepIdx >= 0 ? sel.value.slice(sepIdx + 2) : sel.value;
+        const parentGroupRaw =
+          groupSel && groupSel.value !== '' ? (groups[Number(groupSel.value)]?.raw || null) : null;
+        const res = ctx.actions.addBookmark({
+          type,
+          path: targetPath,
+          title: titleInput.value,
+          parentGroupRaw,
+        });
+        if (!res || !res.ok) {
+          errEl.textContent = (res && res.message) || '添加书签失败';
+          errEl.style.display = '';
+          return;
+        }
         close();
+      };
+
+      addBtn.addEventListener('click', submit);
+      titleInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submit();
+        }
       });
       footer.appendChild(cancelBtn);
       footer.appendChild(addBtn);
+      body.appendChild(footer);
+      setTimeout(() => filterInput.focus(), 20);
+    });
+  }
+
+  function openConfirmDeleteBookmarkGroupModal(groupNode) {
+    if (!groupNode) return;
+    showModal('删除书签分组', (body, close) => {
+      let msg;
+      if (groupNode.leafCount > 0 && groupNode.groupCount > 0) {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.groupCount} 个子分组和 ${groupNode.leafCount} 条书签？`;
+      } else if (groupNode.leafCount > 0) {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.leafCount} 条书签？`;
+      } else {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.groupCount} 个子分组？`;
+      }
+      body.appendChild(el('div', '', msg));
+      const hint = el('div', 'ch-form-label', '删除后将同步从 Obsidian 书签中移除，且不可撤销。');
+      hint.style.fontWeight = '400';
+      body.appendChild(hint);
+
+      const footer = el('div', 'ch-modal-footer');
+      const cancelBtn = el('button', 'ch-btn', '取消');
+      const confirmBtn = el('button', 'ch-btn is-danger', '确认删除');
+      cancelBtn.addEventListener('click', close);
+      confirmBtn.addEventListener('click', () => {
+        ctx.actions.removeBookmark(groupNode);
+        close();
+      });
+      footer.appendChild(cancelBtn);
+      footer.appendChild(confirmBtn);
       body.appendChild(footer);
     });
   }
@@ -564,7 +675,8 @@ function createModalManager(ctx) {
     openNewTaskModal,
     openNewExecutionTaskModal,
     openNewNoteModal,
-    openAddPinModal,
+    openAddBookmarkModal,
+    openConfirmDeleteBookmarkGroupModal,
     openSettingsModal,
     cleanup,
   };

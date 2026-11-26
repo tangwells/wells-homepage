@@ -4,6 +4,7 @@ const { formatDateYMD, pad2, getIsoWeekInfo, renderTemplateText } = require('../
 const { planDailyEntryInsertion, buildFlashEntryLine, buildImportantEntryLine } = require('../parsers/journal');
 const { patchAgentDeckTaskKeyword, planExecutionTaskInsertion, planRemoveTaskBlock } = require('../parsers/execution');
 const { planProjectTaskInsertion, patchTaskLine, planAddTaskDependency, planRemoveTaskDependency } = require('../parsers/project');
+const { addVaultBookmark, removeVaultBookmark, openVaultBookmark } = require('./bookmarks-adapter');
 
 async function ensureFolderExists(app, filePath) {
   const parts = String(filePath || '').split('/');
@@ -78,7 +79,7 @@ function runObsidianCommand(app, obsidian, commandId, fallbackLabel) {
 /**
  * 封装对 Vault 的各类写回操作，并在写回后触发增量刷新回调 onPathsChanged。
  */
-function createVaultActions({ app, obsidian, store, onPathsChanged }) {
+function createVaultActions({ app, obsidian, store, onPathsChanged, onBookmarksChanged }) {
   async function notifyChanged(paths) {
     if (typeof onPathsChanged === 'function') {
       await onPathsChanged(paths);
@@ -291,18 +292,26 @@ function createVaultActions({ app, obsidian, store, onPathsChanged }) {
     await openFileAtLine(app, targetPath);
   }
 
-  async function triggerPinnedEntry(pin) {
-    if (pin.kind === 'daily') {
-      await openOrCreateDailyNote(formatDateYMD(new Date()));
-    } else if (pin.kind === 'weekly') {
-      await openOrCreateWeeklyNote();
-    } else if (pin.kind === 'quickadd') {
-      runQuickAddChoice(app, obsidian, pin.target);
-    } else if (pin.kind === 'command') {
-      runObsidianCommand(app, obsidian, pin.target, pin.label);
-    } else if (pin.target) {
-      await openFileAtLine(app, pin.target);
+  function addBookmark(payload) {
+    const res = addVaultBookmark(app, obsidian, payload);
+    if (res.ok) {
+      store.refreshBookmarks();
+      if (typeof onBookmarksChanged === 'function') onBookmarksChanged();
     }
+    return res;
+  }
+
+  function removeBookmark(node) {
+    const ok = removeVaultBookmark(app, obsidian, node && node.raw, node && node.title);
+    if (ok) {
+      store.refreshBookmarks();
+      if (typeof onBookmarksChanged === 'function') onBookmarksChanged();
+    }
+    return ok;
+  }
+
+  async function openBookmark(node, newLeaf = false) {
+    return openVaultBookmark(app, obsidian, node, newLeaf);
   }
 
   return {
@@ -317,7 +326,9 @@ function createVaultActions({ app, obsidian, store, onPathsChanged }) {
     createNewTask,
     openOrCreateDailyNote,
     openOrCreateWeeklyNote,
-    triggerPinnedEntry,
+    addBookmark,
+    removeBookmark,
+    openBookmark,
   };
 }
 

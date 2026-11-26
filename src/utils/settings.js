@@ -1,10 +1,6 @@
 'use strict';
 
-const { DEFAULT_PINNED_ENTRIES, DEFAULT_SETTINGS } = require('../constants');
-
-function cloneDefaultPins() {
-  return DEFAULT_PINNED_ENTRIES.map((x) => ({ ...x }));
-}
+const { DEFAULT_SETTINGS } = require('../constants');
 
 function clampNumber(val, min, max, fallback) {
   const n = Number(val);
@@ -16,17 +12,6 @@ function normalizeSettings(rawOptions, localOverrides) {
   const base = rawOptions && typeof rawOptions === 'object' ? rawOptions : {};
   const local = localOverrides && typeof localOverrides === 'object' ? localOverrides : {};
   const merged = { ...DEFAULT_SETTINGS, ...base, ...local };
-  const pins = Array.isArray(merged.pinnedEntries)
-    ? merged.pinnedEntries
-        .filter((p) => p && typeof p === 'object' && p.label)
-        .map((p, idx) => ({
-          id: String(p.id || 'pin-' + idx),
-          label: String(p.label),
-          kind: String(p.kind || 'file'),
-          target: p.target ? String(p.target) : '',
-          icon: p.icon ? String(p.icon) : 'bookmark',
-        }))
-    : cloneDefaultPins();
 
   return {
     title: typeof merged.title === 'string' && merged.title.trim() ? merged.title.trim() : DEFAULT_SETTINGS.title,
@@ -55,7 +40,6 @@ function normalizeSettings(rawOptions, localOverrides) {
     ganttStatusFilter: ['all', 'doing', 'done', 'overdue'].includes(merged.ganttStatusFilter) ? merged.ganttStatusFilter : 'doing',
     stickyFolded: Boolean(merged.stickyFolded),
     focusFolded: Boolean(merged.focusFolded),
-    pinnedEntries: pins,
     openOnStartup: merged.openOnStartup !== false,
     openOnEmpty: merged.openOnEmpty !== false,
     openOnNewEmptyTab: Boolean(merged.openOnNewEmptyTab),
@@ -63,7 +47,6 @@ function normalizeSettings(rawOptions, localOverrides) {
 }
 
 module.exports = {
-  cloneDefaultPins,
   clampNumber,
   normalizeSettings,
 };

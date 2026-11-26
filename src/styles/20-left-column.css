@@ -52,10 +52,15 @@
   cursor: pointer;
 }
 
-.ch-mini-pill-btn:hover, .ch-mini-pill-btn.is-active {
+.ch-mini-pill-btn:hover:not(:disabled), .ch-mini-pill-btn.is-active {
   border-color: var(--ch-accent);
   color: var(--ch-accent-strong);
   background: var(--ch-accent-soft);
+}
+
+.ch-mini-pill-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ch-seg-tabs {
@@ -233,4 +238,41 @@
   color: var(--ch-text-faint);
   margin-top: 2px;
   padding: 0 4px;
+}
+
+.ch-bm-list {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ch-bm-group-row {
+  font-weight: 600;
+}
+
+.ch-bm-chevron {
+  width: 11px;
+  font-size: 10px;
+  color: var(--ch-text-faint);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ch-bm-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ch-bm-item-row.is-broken .ch-list-row-text {
+  color: var(--ch-text-faint);
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
+.ch-bm-item-row.is-broken .ch-bm-icon {
+  opacity: 0.55;
+}
+
+.ch-bm-disabled {
+  padding: 12px 6px;
 }

@@ -6,6 +6,7 @@ const { VIEW_TYPE } = require('../constants');
 const { el } = require('../utils/dom');
 const { VaultDataStore } = require('../services/data-store');
 const { createVaultActions } = require('../services/vault-adapter');
+const { getBookmarksPlugin } = require('../services/bookmarks-adapter');
 const { SpiralEmbedController } = require('../services/spiral-embed');
 const { createModalManager } = require('../ui/modals');
 const { createStickyHeaderSection } = require('../ui/sticky-header');
@@ -38,6 +39,8 @@ class CarrotHomeView extends ItemView {
     this.resizeObserver = null;
     this.batchTimer = null;
     this.pendingChanges = [];
+    this._boundBookmarksPlugin = null;
+    this._bookmarksEventRef = null;
   }
 
   getViewType() {
@@ -142,8 +145,32 @@ class CarrotHomeView extends ItemView {
     this.applyDirty(dirty);
   }
 
+  unbindBookmarksPlugin() {
+    if (this._boundBookmarksPlugin && this._bookmarksEventRef && typeof this._boundBookmarksPlugin.offref === 'function') {
+      try { this._boundBookmarksPlugin.offref(this._bookmarksEventRef); } catch (_e) {}
+    }
+    this._boundBookmarksPlugin = null;
+    this._bookmarksEventRef = null;
+  }
+
+  syncBookmarksBinding() {
+    const current = getBookmarksPlugin(this.app);
+    if (current === this._boundBookmarksPlugin) return false;
+    this.unbindBookmarksPlugin();
+    if (current && typeof current.on === 'function') {
+      this._boundBookmarksPlugin = current;
+      this._bookmarksEventRef = current.on('changed', () => {
+        if (this.isClosed || !this.store) return;
+        this.store.refreshBookmarks();
+        this.leftCol?.updateBookmarks();
+      });
+    }
+    return true;
+  }
+
   async forceReloadAll() {
     if (this.isClosed || !this.store) return;
+    this.syncBookmarksBinding();
     this.spiralController.resetRenderedFlag();
     const ok = await this.store.loadAll();
     if (!ok || this.isClosed) return;
@@ -200,7 +227,7 @@ class CarrotHomeView extends ItemView {
     if (has('title') || has('showTitle')) this.stickyHeader.updateHero();
     if (has('showClock')) this.leftCol.updateClock();
     if (has('showCalendar')) this.leftCol.updateCalendar();
-    if (has('showBookmarks') || has('pinnedEntries')) this.leftCol.updateBookmarks();
+    if (has('showBookmarks')) this.leftCol.updateBookmarks();
     if (has('showRecent') || has('recentCount')) this.leftCol.updateRecent();
     if (has('showJournal')) this.journalCard.update();
     if (has('showTasks') || has('taskLayout') || has('showCompletedTasks') || has('taskDensity')) {
@@ -269,6 +296,9 @@ class CarrotHomeView extends ItemView {
       obsidian: Obsidian,
       store: this.store,
       onPathsChanged: (paths) => this.refreshPaths(paths),
+      onBookmarksChanged: () => {
+        if (!this.isClosed) this.leftCol?.updateBookmarks();
+      },
     });
 
     const getSettings = () => this.getSettings();
@@ -379,10 +409,21 @@ class CarrotHomeView extends ItemView {
     this.clockTimer = setInterval(() => this.leftCol?.updateClockDigits(), 15000);
     this.spiralMinuteTimer = setInterval(() => this.spiralController?.sync({ force: true }), 60 * 1000);
 
+    this.syncBookmarksBinding();
+
     if (this.app?.workspace?.on) {
       this.registerEvent(
         this.app.workspace.on('agent-deck:sessions-changed', () => {
           this.spiralController?.scheduleRender({ force: true });
+        })
+      );
+      this.registerEvent(
+        this.app.workspace.on('layout-change', () => {
+          if (this.isClosed || !this.store) return;
+          if (this.syncBookmarksBinding()) {
+            this.store.refreshBookmarks();
+            this.leftCol?.updateBookmarks();
+          }
         })
       );
     }
@@ -399,13 +440,24 @@ class CarrotHomeView extends ItemView {
       for (const evt of ['modify', 'create', 'delete']) {
         this.registerEvent(
           this.app.vault.on(evt, (file) => {
-            if (file && file.path) this.queueFileChange(evt, file.path);
+            if (!file || !file.path) return;
+            if ((evt === 'create' || evt === 'delete') && this.store?.hasBookmarkForPath(file.path)) {
+              this.store.refreshBookmarks();
+              this.leftCol?.updateBookmarks();
+            }
+            this.queueFileChange(evt, file.path);
           })
         );
       }
       this.registerEvent(
         this.app.vault.on('rename', (file, oldPath) => {
-          if (file && file.path) this.queueFileChange('rename', file.path, oldPath);
+          if (file && file.path) {
+            if (this.store?.hasBookmarkForPath(file.path) || this.store?.hasBookmarkForPath(oldPath)) {
+              this.store.refreshBookmarks();
+              this.leftCol?.updateBookmarks();
+            }
+            this.queueFileChange('rename', file.path, oldPath);
+          }
         })
       );
     }
@@ -421,6 +473,7 @@ class CarrotHomeView extends ItemView {
 
   async onClose() {
     this.isClosed = true;
+    this.unbindBookmarksPlugin();
     if (this.clockTimer) {
       clearInterval(this.clockTimer);
       this.clockTimer = null;

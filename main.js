@@ -9,14 +9,6 @@ var __chModules = {
 const VIEW_TYPE = 'carrot-home-view';
 const PLUGIN_ID = 'carrot-home';
 
-const DEFAULT_PINNED_ENTRIES = [
-  { id: 'pin-today', label: '今日日注', kind: 'daily', icon: 'calendar-days' },
-  { id: 'pin-week', label: '本周周志', kind: 'weekly', icon: 'calendar-range' },
-  { id: 'pin-aps', label: 'APS 看板', kind: 'file', target: '01_附件/components/组件/APS.components', icon: 'layout-dashboard' },
-  { id: 'pin-new-proj', label: '新建项目', kind: 'quickadd', target: '项目', icon: 'folder-plus' },
-  { id: 'pin-new-study', label: '新建课题', kind: 'quickadd', target: '课题', icon: 'book-plus' },
-];
-
 const DEFAULT_SETTINGS = {
   title: '我的工作台',
   showTitle: true,
@@ -44,7 +36,6 @@ const DEFAULT_SETTINGS = {
   ganttStatusFilter: 'doing',
   stickyFolded: false,
   focusFolded: false,
-  pinnedEntries: DEFAULT_PINNED_ENTRIES,
   // 主页生命周期接管（替代 Components homepage 设置）
   openOnStartup: true,
   openOnEmpty: true,
@@ -63,7 +54,6 @@ const CN_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 module.exports = {
   VIEW_TYPE,
   PLUGIN_ID,
-  DEFAULT_PINNED_ENTRIES,
   DEFAULT_SETTINGS,
   DAY_PERIODS,
   CN_WEEKDAYS,
@@ -2099,11 +2089,342 @@ module.exports = {
 };
 
   },
+  "./services/bookmarks-adapter.js": function (require, module, exports) {
+'use strict';
+
+const BOOKMARK_ICONS = {
+  group: { icon: 'folder', fallback: '📁' },
+  file: { icon: 'file-text', fallback: '📄' },
+  folder: { icon: 'folder', fallback: '📁' },
+  search: { icon: 'search', fallback: '🔍' },
+  graph: { icon: 'git-fork', fallback: '🕸' },
+  url: { icon: 'globe', fallback: '🌐' },
+};
+
+function getBookmarkIcon(type) {
+  return BOOKMARK_ICONS[type] || { icon: 'bookmark', fallback: '🔖' };
+}
+
+function getBookmarksPlugin(app) {
+  const ip = app && app.internalPlugins;
+  if (!ip) return null;
+  if (typeof ip.getEnabledPluginById === 'function') {
+    const enabledInst = ip.getEnabledPluginById('bookmarks');
+    if (enabledInst) return enabledInst;
+  }
+  const entry = ip.plugins && ip.plugins.bookmarks;
+  if (!entry) return null;
+  if ('enabled' in entry && !entry.enabled) return null;
+  return entry.instance || null;
+}
+
+function isExcludedVaultPath(p) {
+  if (!p || typeof p !== 'string') return true;
+  return (
+    p === '.trash' ||
+    p.startsWith('.trash/') ||
+    p === '.obsidian' ||
+    p.startsWith('.obsidian/')
+  );
+}
+
+function resolveBookmarkTitle(plugin, item) {
+  if (!item || typeof item !== 'object') return '未命名书签';
+  if (typeof item.title === 'string' && item.title.trim()) {
+    return item.title;
+  }
+  if (plugin && typeof plugin.getItemTitle === 'function') {
+    try {
+      const resolved = plugin.getItemTitle(item);
+      if (typeof resolved === 'string' && resolved.trim()) {
+        return resolved;
+      }
+    } catch (_e) {}
+  }
+  const type = item.type || (item.path ? 'file' : '');
+  if (type === 'group') return '未命名分组';
+  if (type === 'file') {
+    const base = String(item.path || '').replace(/^.*\//, '').replace(/\.md$/i, '');
+    return (base || item.path || '未命名文件') + (item.subpath || '');
+  }
+  if (type === 'folder') {
+    const cleaned = String(item.path || '').replace(/\/+$/, '');
+    return cleaned.replace(/^.*\//, '') || cleaned || '未命名文件夹';
+  }
+  if (type === 'search') return item.query || '搜索';
+  if (type === 'graph') return '关系图谱';
+  if (type === 'url') return item.url || '网页链接';
+  return item.path || item.query || item.url || '未命名书签';
+}
+
+function isBookmarkBroken(app, item) {
+  if (!item || typeof item !== 'object') return false;
+  if (item.type !== 'file' && item.type !== 'folder') return false;
+  if (!item.path) return true;
+  const target = app && app.vault && typeof app.vault.getAbstractFileByPath === 'function'
+    ? app.vault.getAbstractFileByPath(item.path)
+    : null;
+  return !target;
+}
+
+function buildBookmarkTree(app, plugin) {
+  if (!plugin) {
+    return { enabled: false, items: [], groups: [] };
+  }
+  const rawItems = Array.isArray(plugin.items) ? plugin.items : [];
+  const groups = [];
+
+  function walk(items, parentRaw, parentKey, depth, parentLabels) {
+    const out = [];
+    const occMap = new Map();
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const type = item.type || (item.path ? 'file' : item.query ? 'search' : item.url ? 'url' : 'file');
+      const title = resolveBookmarkTitle(plugin, item);
+      const sig = `${type}:${title}`;
+      const occ = occMap.get(sig) || 0;
+      occMap.set(sig, occ + 1);
+      const key = `${parentKey}/${sig}#${occ}`;
+
+      if (type === 'group') {
+        const subItems = Array.isArray(item.items) ? item.items : [];
+        const groupLabels = parentLabels.concat([title]);
+        groups.push({
+          raw: item,
+          label: groupLabels.join(' / '),
+          depth,
+        });
+        const children = walk(subItems, item, key, depth + 1, groupLabels);
+        let leafCount = 0;
+        let groupCount = 0;
+        for (const ch of children) {
+          if (ch.type === 'group') {
+            groupCount += 1 + ch.groupCount;
+            leafCount += ch.leafCount;
+          } else {
+            leafCount += 1;
+          }
+        }
+        out.push({
+          key,
+          type: 'group',
+          title,
+          raw: item,
+          parentRaw,
+          path: '',
+          subpath: '',
+          query: '',
+          url: '',
+          broken: false,
+          depth,
+          children,
+          leafCount,
+          groupCount,
+          directCount: children.length,
+        });
+      } else {
+        out.push({
+          key,
+          type,
+          title,
+          raw: item,
+          parentRaw,
+          path: item.path || '',
+          subpath: item.subpath || '',
+          query: item.query || '',
+          url: item.url || '',
+          broken: isBookmarkBroken(app, item),
+          depth,
+          children: [],
+          leafCount: 0,
+          groupCount: 0,
+          directCount: 0,
+        });
+      }
+    }
+    return out;
+  }
+
+  const items = walk(rawItems, null, 'root', 0, []);
+  return { enabled: true, items, groups };
+}
+
+function hasDuplicateInGroup(plugin, targetGroupRaw, type, targetPath) {
+  if (!plugin) return false;
+  const list = targetGroupRaw
+    ? (Array.isArray(targetGroupRaw.items) ? targetGroupRaw.items : [])
+    : (Array.isArray(plugin.items) ? plugin.items : []);
+  return list.some(
+    (x) => x && x.type === type && x.path === targetPath && !x.subpath
+  );
+}
+
+function addVaultBookmark(app, obsidian, { type, path, title = '', parentGroupRaw = null } = {}) {
+  const plugin = getBookmarksPlugin(app);
+  if (!plugin || typeof plugin.addItem !== 'function') {
+    const message = '请先启用 Obsidian 核心插件「书签」';
+    if (obsidian && obsidian.Notice) new obsidian.Notice(message);
+    return { ok: false, reason: 'disabled', message };
+  }
+  if ((type !== 'file' && type !== 'folder') || !path) {
+    const message = '请选择有效的文件或文件夹';
+    if (obsidian && obsidian.Notice) new obsidian.Notice(message);
+    return { ok: false, reason: 'invalid', message };
+  }
+  if (hasDuplicateInGroup(plugin, parentGroupRaw || null, type, path)) {
+    const message = '目标分组中已存在该书签';
+    if (obsidian && obsidian.Notice) new obsidian.Notice(message);
+    return { ok: false, reason: 'duplicate', message };
+  }
+  const item = {
+    type,
+    ctime: Date.now(),
+    path,
+  };
+  const customTitle = typeof title === 'string' ? title.trim() : '';
+  if (customTitle) {
+    item.title = customTitle;
+  }
+  plugin.addItem(item, parentGroupRaw || null);
+  const shown = customTitle || resolveBookmarkTitle(plugin, item);
+  if (obsidian && obsidian.Notice) {
+    new obsidian.Notice(`已添加到书签：${shown}`);
+  }
+  return { ok: true, item };
+}
+
+function removeVaultBookmark(app, obsidian, rawItem, displayTitle = '') {
+  const plugin = getBookmarksPlugin(app);
+  if (!plugin || typeof plugin.removeItem !== 'function' || !rawItem) {
+    if (obsidian && obsidian.Notice && !plugin) {
+      new obsidian.Notice('请先启用 Obsidian 核心插件「书签」');
+    }
+    return false;
+  }
+  const title = displayTitle || resolveBookmarkTitle(plugin, rawItem);
+  plugin.removeItem(rawItem);
+  if (obsidian && obsidian.Notice) {
+    new obsidian.Notice(`已移除书签：${title}`);
+  }
+  return true;
+}
+
+async function openVaultBookmark(app, obsidian, node, newLeaf = false) {
+  if (!node || !node.raw) return false;
+  const plugin = getBookmarksPlugin(app);
+  if (node.broken) {
+    if (obsidian && obsidian.Notice) {
+      new obsidian.Notice(`目标文件或文件夹不存在：${node.path}`);
+    }
+    return false;
+  }
+  if (plugin && typeof plugin.openBookmark === 'function') {
+    await plugin.openBookmark(node.raw, newLeaf ? 'tab' : false);
+    return true;
+  }
+  if (node.type === 'file' && node.path) {
+    const target = node.subpath ? `${node.path}${node.subpath}` : node.path;
+    app && app.workspace && app.workspace.openLinkText && app.workspace.openLinkText(target, '', Boolean(newLeaf));
+    return true;
+  }
+  if (node.type === 'folder' && node.path) {
+    const f = app && app.vault && app.vault.getAbstractFileByPath && app.vault.getAbstractFileByPath(node.path);
+    const explorer = app && app.internalPlugins && app.internalPlugins.getEnabledPluginById
+      ? app.internalPlugins.getEnabledPluginById('file-explorer')
+      : app && app.internalPlugins && app.internalPlugins.plugins && app.internalPlugins.plugins['file-explorer'] && app.internalPlugins.plugins['file-explorer'].instance;
+    if (f && explorer && typeof explorer.revealInFolder === 'function') {
+      explorer.revealInFolder(f);
+      return true;
+    }
+  }
+  if (node.type === 'search' && node.query) {
+    const gs = app && app.internalPlugins && app.internalPlugins.plugins && app.internalPlugins.plugins['global-search'] && app.internalPlugins.plugins['global-search'].instance;
+    if (gs && typeof gs.openGlobalSearch === 'function') {
+      gs.openGlobalSearch(node.query);
+      return true;
+    }
+  }
+  if (node.type === 'url' && node.url && typeof window !== 'undefined' && typeof window.open === 'function') {
+    window.open(node.url, '_blank');
+    return true;
+  }
+  return false;
+}
+
+function listVaultBookmarkTargets(app) {
+  const vault = app && app.vault;
+  if (!vault) return [];
+
+  const seen = new Set();
+  const targets = [];
+
+  function pushTarget(type, p, name) {
+    if (!p || p === '/' || isExcludedVaultPath(p)) return;
+    const id = `${type}:${p}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    targets.push({
+      type,
+      path: p,
+      name: name || p.replace(/^.*\//, ''),
+    });
+  }
+
+  const allLoaded = typeof vault.getAllLoadedFiles === 'function' ? vault.getAllLoadedFiles() : null;
+  if (Array.isArray(allLoaded) && allLoaded.length > 0) {
+    for (const item of allLoaded) {
+      if (!item || !item.path || item.path === '/') continue;
+      if (Array.isArray(item.children)) {
+        pushTarget('folder', item.path, item.name);
+      } else {
+        pushTarget('file', item.path, item.name || item.basename);
+      }
+    }
+  }
+
+  const files = typeof vault.getFiles === 'function' ? vault.getFiles() : [];
+  for (const f of files) {
+    if (!f || !f.path) continue;
+    pushTarget('file', f.path, f.name || f.basename);
+    if (!allLoaded) {
+      const parts = f.path.split('/');
+      parts.pop();
+      let cur = '';
+      for (const seg of parts) {
+        if (!seg) continue;
+        cur = cur ? `${cur}/${seg}` : seg;
+        pushTarget('folder', cur, seg);
+      }
+    }
+  }
+
+  targets.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  return targets;
+}
+
+module.exports = {
+  getBookmarkIcon,
+  getBookmarksPlugin,
+  resolveBookmarkTitle,
+  isBookmarkBroken,
+  buildBookmarkTree,
+  hasDuplicateInGroup,
+  addVaultBookmark,
+  removeVaultBookmark,
+  openVaultBookmark,
+  listVaultBookmarkTargets,
+};
+
+  },
   "./services/data-store.js": function (require, module, exports) {
 'use strict';
 
 const { formatDateYMD, getPeriodTitleByHour, pickDefaultJournalPeriod } = require('../utils/date');
-const { flattenObsidianBookmarks } = require('../utils/dom');
+const { getBookmarksPlugin, buildBookmarkTree } = require('./bookmarks-adapter');
 const { scanMarkdownTasks } = require('../parsers/markdown');
 const { parseDailyActiveStatus, parseDailyJournalTimeline } = require('../parsers/journal');
 const { parseExecutionTasksFromDaily } = require('../parsers/execution');
@@ -2167,7 +2488,10 @@ class VaultDataStore {
       selectedDate: '',
       dailyFilesSet: new Set(),
       recentNotes: [],
-      obsidianBookmarks: [],
+      bookmarksEnabled: true,
+      bookmarkTree: [],
+      bookmarkGroups: [],
+      bookmarkCollapsed: new Set(),
       projects: [],
       execTasks: [],
       execQuickScope: 'focus', // focus | today | overdue | open | done
@@ -2328,9 +2652,25 @@ class VaultDataStore {
     this._syncIdeaBatchOrder(allIdeas);
   }
 
-  _refreshBookmarks() {
-    const bmItems = this.app.internalPlugins?.plugins?.bookmarks?.instance?.items || [];
-    this.state.obsidianBookmarks = flattenObsidianBookmarks(bmItems, []);
+  refreshBookmarks() {
+    const plugin = getBookmarksPlugin(this.app);
+    const tree = buildBookmarkTree(this.app, plugin);
+    this.state.bookmarksEnabled = tree.enabled;
+    this.state.bookmarkTree = tree.items;
+    this.state.bookmarkGroups = tree.groups;
+    return tree;
+  }
+
+  hasBookmarkForPath(targetPath) {
+    if (!targetPath) return false;
+    const walk = (nodes) => {
+      for (const n of nodes) {
+        if (n.path === targetPath) return true;
+        if (n.children && n.children.length > 0 && walk(n.children)) return true;
+      }
+      return false;
+    };
+    return walk(this.state.bookmarkTree || []);
   }
 
   async loadAll() {
@@ -2374,7 +2714,7 @@ class VaultDataStore {
     }
     this._aggregateLogsFromCache(todayPath);
     this._buildRecentNotes();
-    this._refreshBookmarks();
+    this.refreshBookmarks();
 
     const journalPath = `06_日志/${this.state.journalDate}.md`;
     const cachedJournalEntry = this.logCache.get(journalPath);
@@ -2856,6 +3196,7 @@ const { formatDateYMD, pad2, getIsoWeekInfo, renderTemplateText } = require('../
 const { planDailyEntryInsertion, buildFlashEntryLine, buildImportantEntryLine } = require('../parsers/journal');
 const { patchAgentDeckTaskKeyword, planExecutionTaskInsertion, planRemoveTaskBlock } = require('../parsers/execution');
 const { planProjectTaskInsertion, patchTaskLine, planAddTaskDependency, planRemoveTaskDependency } = require('../parsers/project');
+const { addVaultBookmark, removeVaultBookmark, openVaultBookmark } = require('./bookmarks-adapter');
 
 async function ensureFolderExists(app, filePath) {
   const parts = String(filePath || '').split('/');
@@ -2930,7 +3271,7 @@ function runObsidianCommand(app, obsidian, commandId, fallbackLabel) {
 /**
  * 封装对 Vault 的各类写回操作，并在写回后触发增量刷新回调 onPathsChanged。
  */
-function createVaultActions({ app, obsidian, store, onPathsChanged }) {
+function createVaultActions({ app, obsidian, store, onPathsChanged, onBookmarksChanged }) {
   async function notifyChanged(paths) {
     if (typeof onPathsChanged === 'function') {
       await onPathsChanged(paths);
@@ -3143,18 +3484,26 @@ function createVaultActions({ app, obsidian, store, onPathsChanged }) {
     await openFileAtLine(app, targetPath);
   }
 
-  async function triggerPinnedEntry(pin) {
-    if (pin.kind === 'daily') {
-      await openOrCreateDailyNote(formatDateYMD(new Date()));
-    } else if (pin.kind === 'weekly') {
-      await openOrCreateWeeklyNote();
-    } else if (pin.kind === 'quickadd') {
-      runQuickAddChoice(app, obsidian, pin.target);
-    } else if (pin.kind === 'command') {
-      runObsidianCommand(app, obsidian, pin.target, pin.label);
-    } else if (pin.target) {
-      await openFileAtLine(app, pin.target);
+  function addBookmark(payload) {
+    const res = addVaultBookmark(app, obsidian, payload);
+    if (res.ok) {
+      store.refreshBookmarks();
+      if (typeof onBookmarksChanged === 'function') onBookmarksChanged();
     }
+    return res;
+  }
+
+  function removeBookmark(node) {
+    const ok = removeVaultBookmark(app, obsidian, node && node.raw, node && node.title);
+    if (ok) {
+      store.refreshBookmarks();
+      if (typeof onBookmarksChanged === 'function') onBookmarksChanged();
+    }
+    return ok;
+  }
+
+  async function openBookmark(node, newLeaf = false) {
+    return openVaultBookmark(app, obsidian, node, newLeaf);
   }
 
   return {
@@ -3169,7 +3518,9 @@ function createVaultActions({ app, obsidian, store, onPathsChanged }) {
     createNewTask,
     openOrCreateDailyNote,
     openOrCreateWeeklyNote,
-    triggerPinnedEntry,
+    addBookmark,
+    removeBookmark,
+    openBookmark,
   };
 }
 
@@ -4315,6 +4666,7 @@ const {
 } = require('../utils/date');
 const { el, setIconSafe, preserveScroll } = require('../utils/dom');
 const { openFileAtLine } = require('../services/vault-adapter');
+const { getBookmarkIcon } = require('../services/bookmarks-adapter');
 
 function createLeftColumnSection({
   app,
@@ -4554,6 +4906,8 @@ function createLeftColumnSection({
   function updateBookmarks() {
     const settings = getSettings();
     const state = store.state;
+    const prevList = bookmarksSlot.querySelector('.ch-bm-list');
+    const prevListTop = prevList && typeof prevList.scrollTop === 'number' ? prevList.scrollTop : 0;
 
     preserveScroll(getScrollEl(), () => {
       bookmarksSlot.replaceChildren();
@@ -4569,58 +4923,136 @@ function createLeftColumnSection({
       titleWrap.appendChild(el('span', 'ch-card-accent-bar'));
       titleWrap.appendChild(el('h3', 'ch-card-title', '书签'));
       head.appendChild(titleWrap);
-      const addPinBtn = el('button', 'ch-mini-pill-btn', '+ 添加');
-      addPinBtn.addEventListener('click', modals.openAddPinModal);
-      head.appendChild(addPinBtn);
+
+      const addBmBtn = el('button', 'ch-mini-pill-btn', '+ 添加');
+      if (!state.bookmarksEnabled) {
+        addBmBtn.disabled = true;
+        addBmBtn.title = '请先启用 Obsidian 核心插件「书签」';
+      } else {
+        addBmBtn.addEventListener('click', modals.openAddBookmarkModal);
+      }
+      head.appendChild(addBmBtn);
       card.appendChild(head);
 
-      const list = el('div', 'ch-item-list');
-      list.appendChild(el('div', 'ch-sub-section-label', '工作台常用入口'));
-      for (const pin of settings.pinnedEntries) {
-        const row = el('div', 'ch-list-row');
-        const left = el('div', 'ch-list-row-left');
-        const ico = el('span', '');
-        ico.style.display = 'inline-flex';
-        setIconSafe(obsidian, ico, pin.icon || 'bookmark', '★');
-        left.appendChild(ico);
-        left.appendChild(el('span', 'ch-list-row-text', pin.label));
-        row.appendChild(left);
-
-        const del = el('button', 'ch-list-row-del', '×');
-        del.title = '移除入口';
-        del.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const next = getSettings().pinnedEntries.filter((x) => x.id !== pin.id);
-          updateSettings({ pinnedEntries: next });
-        });
-        row.appendChild(del);
-        row.addEventListener('click', () => store.actions?.triggerPinnedEntry(pin));
-        list.appendChild(row);
+      if (!state.bookmarksEnabled) {
+        card.appendChild(el('div', 'ch-empty ch-bm-disabled', '请先启用 Obsidian 核心插件「书签」'));
+        bookmarksSlot.appendChild(card);
+        return;
       }
 
-      if (state.obsidianBookmarks.length > 0) {
-        list.appendChild(el('div', 'ch-sub-section-label', 'Obsidian 原生书签'));
-        for (const bm of state.obsidianBookmarks.slice(0, 12)) {
-          const row = el('div', 'ch-list-row');
-          const left = el('div', 'ch-list-row-left');
-          const ico = el('span', '');
-          ico.style.display = 'inline-flex';
-          setIconSafe(obsidian, ico, bm.type === 'search' ? 'search' : 'bookmark', '🔖');
-          left.appendChild(ico);
-          left.appendChild(el('span', 'ch-list-row-text', bm.title));
-          row.appendChild(left);
-          row.addEventListener('click', () => {
-            if (bm.path) {
-              app.workspace.openLinkText(bm.subpath ? `${bm.path}${bm.subpath}` : bm.path, '', false);
-            } else if (bm.query) {
-              app.internalPlugins?.plugins?.['global-search']?.instance?.openGlobalSearch?.(bm.query);
+      if (!Array.isArray(state.bookmarkTree) || state.bookmarkTree.length === 0) {
+        card.appendChild(el('div', 'ch-empty', '暂无书签，点击右上角「+ 添加」或在 Obsidian 书签面板中添加'));
+        bookmarksSlot.appendChild(card);
+        return;
+      }
+
+      const list = el('div', 'ch-item-list ch-bm-list');
+
+      const renderNodes = (nodes) => {
+        for (const node of nodes) {
+          if (node.type === 'group') {
+            const isCollapsed = state.bookmarkCollapsed.has(node.key);
+            const row = el('div', 'ch-list-row ch-bm-group-row');
+            row.style.paddingLeft = `${7 + node.depth * 14}px`;
+            row.dataset.bookmarkKey = node.key;
+
+            const left = el('div', 'ch-list-row-left');
+            left.appendChild(el('span', 'ch-bm-chevron', isCollapsed ? '▸' : '▾'));
+            const ico = el('span', 'ch-bm-icon');
+            ico.style.display = 'inline-flex';
+            setIconSafe(obsidian, ico, 'folder', '📁');
+            left.appendChild(ico);
+            left.appendChild(el('span', 'ch-list-row-text', node.title));
+            row.appendChild(left);
+
+            if (node.leafCount > 0) {
+              row.appendChild(el('span', 'ch-count-muted', String(node.leafCount)));
             }
-          });
-          list.appendChild(row);
+
+            const del = el('button', 'ch-list-row-del', '×');
+            del.title = '删除分组';
+            del.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (node.directCount === 0) {
+                store.actions?.removeBookmark(node);
+              } else {
+                modals.openConfirmDeleteBookmarkGroupModal(node);
+              }
+            });
+            row.appendChild(del);
+
+            row.addEventListener('click', () => {
+              if (state.bookmarkCollapsed.has(node.key)) {
+                state.bookmarkCollapsed.delete(node.key);
+              } else {
+                state.bookmarkCollapsed.add(node.key);
+              }
+              updateBookmarks();
+            });
+            list.appendChild(row);
+
+            if (!isCollapsed && node.children.length > 0) {
+              renderNodes(node.children);
+            }
+          } else {
+            const row = el('div', `ch-list-row ch-bm-item-row${node.broken ? ' is-broken' : ''}`);
+            row.style.paddingLeft = `${7 + node.depth * 14}px`;
+            row.dataset.bookmarkKey = node.key;
+
+            const left = el('div', 'ch-list-row-left');
+            const { icon, fallback } = getBookmarkIcon(node.type);
+            const ico = el('span', 'ch-bm-icon');
+            ico.style.display = 'inline-flex';
+            setIconSafe(obsidian, ico, icon, fallback);
+            left.appendChild(ico);
+            left.appendChild(el('span', 'ch-list-row-text', node.title));
+            row.appendChild(left);
+
+            const del = el('button', 'ch-list-row-del', '×');
+            del.title = '移除书签';
+            del.addEventListener('click', (e) => {
+              e.stopPropagation();
+              store.actions?.removeBookmark(node);
+            });
+            row.appendChild(del);
+
+            if (node.broken) {
+              row.title = `目标文件或文件夹不存在：${node.path}`;
+            } else if (node.type === 'file') {
+              row.title = `${node.path}${node.subpath || ''}`;
+            } else if (node.type === 'folder') {
+              row.title = node.path;
+            } else if (node.type === 'search') {
+              row.title = node.query;
+            } else if (node.type === 'url') {
+              row.title = node.url;
+            } else {
+              row.title = node.title;
+            }
+
+            row.addEventListener('click', (e) => {
+              const isMod = Boolean(
+                obsidian?.Keymap?.isModEvent ? obsidian.Keymap.isModEvent(e) : (e.metaKey || e.ctrlKey)
+              );
+              void store.actions?.openBookmark(node, isMod);
+            });
+            row.addEventListener('auxclick', (e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                void store.actions?.openBookmark(node, true);
+              }
+            });
+            list.appendChild(row);
+          }
         }
-      }
+      };
+
+      renderNodes(state.bookmarkTree);
       card.appendChild(list);
       bookmarksSlot.appendChild(card);
+      if (prevListTop > 0) {
+        list.scrollTop = prevListTop;
+      }
     });
   }
 
@@ -4698,6 +5130,7 @@ module.exports = {
 const { DEFAULT_SETTINGS } = require('../constants');
 const { el } = require('../utils/dom');
 const { openFileAtLine, ensureFolderExists } = require('../services/vault-adapter');
+const { listVaultBookmarkTargets } = require('../services/bookmarks-adapter');
 
 function createModalManager(ctx) {
   let activeModalCleanup = null;
@@ -5045,75 +5478,185 @@ function createModalManager(ctx) {
     });
   }
 
-  function openAddPinModal() {
+  function openAddBookmarkModal() {
     const app = ctx.app;
-    const allFiles = (app.vault.getFiles ? app.vault.getFiles() : []).filter((f) =>
-      /\.(md|components|canvas|xdb)$/i.test(f.path)
-    );
-    showModal('添加常用入口', (body, close) => {
-      const fLabel = el('div', 'ch-form-field');
-      fLabel.appendChild(el('span', 'ch-form-label', '显示名称'));
-      const lblInput = el('input', 'ch-input');
-      lblInput.placeholder = '例如：我的研究主线';
-      fLabel.appendChild(lblInput);
-      body.appendChild(fLabel);
+    const targets = listVaultBookmarkTargets(app);
+    const groups = ctx.store?.state?.bookmarkGroups || [];
 
-      const fFile = el('div', 'ch-form-field');
-      fFile.appendChild(el('span', 'ch-form-label', '目标文件路径（输入筛选）'));
+    showModal('添加书签', (body, close) => {
+      let filterType = 'all';
+
+      const typeTabs = el('div', 'ch-seg-tabs');
+      const tabBtns = [];
+      for (const [kind, label] of [['all', '全部'], ['file', '文件'], ['folder', '文件夹']]) {
+        const b = el('button', `ch-seg-tab${kind === 'all' ? ' is-active' : ''}`, label);
+        b.addEventListener('click', () => {
+          filterType = kind;
+          for (const item of tabBtns) {
+            item.btn.classList.toggle('is-active', item.kind === kind);
+          }
+          refill(filterInput.value);
+        });
+        tabBtns.push({ kind, btn: b });
+        typeTabs.appendChild(b);
+      }
+      body.appendChild(typeTabs);
+
+      const fTarget = el('div', 'ch-form-field');
+      fTarget.appendChild(el('span', 'ch-form-label', '目标文件或文件夹（输入关键词筛选）'));
       const filterInput = el('input', 'ch-input');
-      filterInput.placeholder = '输入关键词过滤笔记或组件…';
+      filterInput.placeholder = '输入路径或名称筛选…';
       const sel = document.createElement('select');
       sel.className = 'ch-select';
       sel.size = 6;
-      sel.style.height = '140px';
+      sel.style.height = '150px';
       sel.style.padding = '4px';
 
+      const fTitle = el('div', 'ch-form-field');
+      fTitle.appendChild(el('span', 'ch-form-label', '自定义标题（可选）'));
+      const titleInput = el('input', 'ch-input');
+      titleInput.placeholder = '留空沿用 Obsidian 默认标题';
+
+      const targetByValue = new Map();
+      function syncTitlePlaceholder() {
+        const hit = targetByValue.get(sel.value);
+        titleInput.placeholder = hit ? `${hit.name}（留空沿用默认标题）` : '留空沿用 Obsidian 默认标题';
+      }
+
+      const errEl = el('div', 'ch-bm-modal-error', '');
+      errEl.style.display = 'none';
+      function clearErr() {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+
       function refill(kw) {
+        clearErr();
         sel.replaceChildren();
-        const q = kw.trim().toLowerCase();
-        const hits = allFiles.filter((f) => !q || f.path.toLowerCase().includes(q)).slice(0, 60);
-        for (const f of hits) {
+        targetByValue.clear();
+        const q = String(kw || '').trim().toLowerCase();
+        const hits = targets
+          .filter((t) => (filterType === 'all' || t.type === filterType) && (!q || t.path.toLowerCase().includes(q)))
+          .slice(0, 100);
+        for (const t of hits) {
+          const val = `${t.type}::${t.path}`;
+          targetByValue.set(val, t);
           const o = document.createElement('option');
-          o.value = f.path;
-          o.textContent = f.path;
+          o.value = val;
+          o.textContent = t.type === 'folder' ? `[文件夹] ${t.path}` : t.path;
           sel.appendChild(o);
         }
-        if (hits[0]) {
-          sel.value = hits[0].path;
-          if (!lblInput.value) lblInput.value = hits[0].basename;
-        }
+        sel.value = hits[0] ? `${hits[0].type}::${hits[0].path}` : '';
+        syncTitlePlaceholder();
       }
-      refill('');
+
       filterInput.addEventListener('input', () => refill(filterInput.value));
       sel.addEventListener('change', () => {
-        const p = sel.value;
-        if (p) lblInput.value = p.replace(/^.*\//, '').replace(/\.[^.]+$/, '');
+        clearErr();
+        syncTitlePlaceholder();
       });
+      refill('');
 
-      fFile.appendChild(filterInput);
-      fFile.appendChild(sel);
-      body.appendChild(fFile);
+      fTarget.appendChild(filterInput);
+      fTarget.appendChild(sel);
+      body.appendChild(fTarget);
+
+      let groupSel = null;
+      if (groups.length > 0) {
+        const fGroup = el('div', 'ch-form-field');
+        fGroup.appendChild(el('span', 'ch-form-label', '所属分组'));
+        groupSel = document.createElement('select');
+        groupSel.className = 'ch-select';
+        groupSel.style.height = '32px';
+        const rootOpt = document.createElement('option');
+        rootOpt.value = '';
+        rootOpt.textContent = '根目录';
+        groupSel.appendChild(rootOpt);
+        groups.forEach((g, idx) => {
+          const opt = document.createElement('option');
+          opt.value = String(idx);
+          opt.textContent = g.label;
+          groupSel.appendChild(opt);
+        });
+        groupSel.addEventListener('change', clearErr);
+        fGroup.appendChild(groupSel);
+        body.appendChild(fGroup);
+      }
+
+      fTitle.appendChild(titleInput);
+      body.appendChild(fTitle);
+      body.appendChild(errEl);
 
       const footer = el('div', 'ch-modal-footer');
       const cancelBtn = el('button', 'ch-btn', '取消');
       const addBtn = el('button', 'ch-btn is-primary', '添加到书签');
       cancelBtn.addEventListener('click', close);
-      addBtn.addEventListener('click', () => {
-        if (!sel.value) return;
-        const nextPins = ctx.getSettings().pinnedEntries.concat([
-          {
-            id: 'pin-' + Date.now(),
-            label: lblInput.value.trim() || sel.value.replace(/^.*\//, ''),
-            kind: 'file',
-            target: sel.value,
-            icon: 'file-text',
-          },
-        ]);
-        ctx.updateSettings({ pinnedEntries: nextPins });
+
+      const submit = () => {
+        if (!sel.value) {
+          errEl.textContent = '请先选择要添加的文件或文件夹';
+          errEl.style.display = '';
+          return;
+        }
+        const sepIdx = sel.value.indexOf('::');
+        const type = sepIdx >= 0 ? sel.value.slice(0, sepIdx) : 'file';
+        const targetPath = sepIdx >= 0 ? sel.value.slice(sepIdx + 2) : sel.value;
+        const parentGroupRaw =
+          groupSel && groupSel.value !== '' ? (groups[Number(groupSel.value)]?.raw || null) : null;
+        const res = ctx.actions.addBookmark({
+          type,
+          path: targetPath,
+          title: titleInput.value,
+          parentGroupRaw,
+        });
+        if (!res || !res.ok) {
+          errEl.textContent = (res && res.message) || '添加书签失败';
+          errEl.style.display = '';
+          return;
+        }
         close();
+      };
+
+      addBtn.addEventListener('click', submit);
+      titleInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submit();
+        }
       });
       footer.appendChild(cancelBtn);
       footer.appendChild(addBtn);
+      body.appendChild(footer);
+      setTimeout(() => filterInput.focus(), 20);
+    });
+  }
+
+  function openConfirmDeleteBookmarkGroupModal(groupNode) {
+    if (!groupNode) return;
+    showModal('删除书签分组', (body, close) => {
+      let msg;
+      if (groupNode.leafCount > 0 && groupNode.groupCount > 0) {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.groupCount} 个子分组和 ${groupNode.leafCount} 条书签？`;
+      } else if (groupNode.leafCount > 0) {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.leafCount} 条书签？`;
+      } else {
+        msg = `确认删除分组「${groupNode.title}」及其下 ${groupNode.groupCount} 个子分组？`;
+      }
+      body.appendChild(el('div', '', msg));
+      const hint = el('div', 'ch-form-label', '删除后将同步从 Obsidian 书签中移除，且不可撤销。');
+      hint.style.fontWeight = '400';
+      body.appendChild(hint);
+
+      const footer = el('div', 'ch-modal-footer');
+      const cancelBtn = el('button', 'ch-btn', '取消');
+      const confirmBtn = el('button', 'ch-btn is-danger', '确认删除');
+      cancelBtn.addEventListener('click', close);
+      confirmBtn.addEventListener('click', () => {
+        ctx.actions.removeBookmark(groupNode);
+        close();
+      });
+      footer.appendChild(cancelBtn);
+      footer.appendChild(confirmBtn);
       body.appendChild(footer);
     });
   }
@@ -5259,7 +5802,8 @@ function createModalManager(ctx) {
     openNewTaskModal,
     openNewExecutionTaskModal,
     openNewNoteModal,
-    openAddPinModal,
+    openAddBookmarkModal,
+    openConfirmDeleteBookmarkGroupModal,
     openSettingsModal,
     cleanup,
   };
@@ -6634,31 +7178,6 @@ function renderTokensInto(container, tokens, app) {
   }
 }
 
-function flattenObsidianBookmarks(items, out = []) {
-  if (!Array.isArray(items)) return out;
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    if (item.type === 'group' && Array.isArray(item.items)) {
-      flattenObsidianBookmarks(item.items, out);
-    } else if (item.type === 'file' || item.path) {
-      out.push({
-        type: item.type || 'file',
-        title: item.title || String(item.path || '').replace(/^.*\//, '').replace(/\.md$/, ''),
-        path: item.path,
-        subpath: item.subpath || '',
-        query: item.query || '',
-      });
-    } else if (item.type === 'search' && item.query) {
-      out.push({
-        type: 'search',
-        title: item.title || item.query,
-        query: item.query,
-      });
-    }
-  }
-  return out;
-}
-
 /**
  * 局部重绘兜底：保留外层滚动容器 scrollTop，防止浏览器因瞬时高度收缩将 scrollTop 重置为 0。
  */
@@ -6678,7 +7197,6 @@ module.exports = {
   el,
   setIconSafe,
   renderTokensInto,
-  flattenObsidianBookmarks,
   preserveScroll,
 };
 
@@ -6899,11 +7417,7 @@ module.exports = {
   "./utils/settings.js": function (require, module, exports) {
 'use strict';
 
-const { DEFAULT_PINNED_ENTRIES, DEFAULT_SETTINGS } = require('../constants');
-
-function cloneDefaultPins() {
-  return DEFAULT_PINNED_ENTRIES.map((x) => ({ ...x }));
-}
+const { DEFAULT_SETTINGS } = require('../constants');
 
 function clampNumber(val, min, max, fallback) {
   const n = Number(val);
@@ -6915,17 +7429,6 @@ function normalizeSettings(rawOptions, localOverrides) {
   const base = rawOptions && typeof rawOptions === 'object' ? rawOptions : {};
   const local = localOverrides && typeof localOverrides === 'object' ? localOverrides : {};
   const merged = { ...DEFAULT_SETTINGS, ...base, ...local };
-  const pins = Array.isArray(merged.pinnedEntries)
-    ? merged.pinnedEntries
-        .filter((p) => p && typeof p === 'object' && p.label)
-        .map((p, idx) => ({
-          id: String(p.id || 'pin-' + idx),
-          label: String(p.label),
-          kind: String(p.kind || 'file'),
-          target: p.target ? String(p.target) : '',
-          icon: p.icon ? String(p.icon) : 'bookmark',
-        }))
-    : cloneDefaultPins();
 
   return {
     title: typeof merged.title === 'string' && merged.title.trim() ? merged.title.trim() : DEFAULT_SETTINGS.title,
@@ -6954,7 +7457,6 @@ function normalizeSettings(rawOptions, localOverrides) {
     ganttStatusFilter: ['all', 'doing', 'done', 'overdue'].includes(merged.ganttStatusFilter) ? merged.ganttStatusFilter : 'doing',
     stickyFolded: Boolean(merged.stickyFolded),
     focusFolded: Boolean(merged.focusFolded),
-    pinnedEntries: pins,
     openOnStartup: merged.openOnStartup !== false,
     openOnEmpty: merged.openOnEmpty !== false,
     openOnNewEmptyTab: Boolean(merged.openOnNewEmptyTab),
@@ -6962,7 +7464,6 @@ function normalizeSettings(rawOptions, localOverrides) {
 }
 
 module.exports = {
-  cloneDefaultPins,
   clampNumber,
   normalizeSettings,
 };
@@ -6977,6 +7478,7 @@ const { VIEW_TYPE } = require('../constants');
 const { el } = require('../utils/dom');
 const { VaultDataStore } = require('../services/data-store');
 const { createVaultActions } = require('../services/vault-adapter');
+const { getBookmarksPlugin } = require('../services/bookmarks-adapter');
 const { SpiralEmbedController } = require('../services/spiral-embed');
 const { createModalManager } = require('../ui/modals');
 const { createStickyHeaderSection } = require('../ui/sticky-header');
@@ -7009,6 +7511,8 @@ class CarrotHomeView extends ItemView {
     this.resizeObserver = null;
     this.batchTimer = null;
     this.pendingChanges = [];
+    this._boundBookmarksPlugin = null;
+    this._bookmarksEventRef = null;
   }
 
   getViewType() {
@@ -7113,8 +7617,32 @@ class CarrotHomeView extends ItemView {
     this.applyDirty(dirty);
   }
 
+  unbindBookmarksPlugin() {
+    if (this._boundBookmarksPlugin && this._bookmarksEventRef && typeof this._boundBookmarksPlugin.offref === 'function') {
+      try { this._boundBookmarksPlugin.offref(this._bookmarksEventRef); } catch (_e) {}
+    }
+    this._boundBookmarksPlugin = null;
+    this._bookmarksEventRef = null;
+  }
+
+  syncBookmarksBinding() {
+    const current = getBookmarksPlugin(this.app);
+    if (current === this._boundBookmarksPlugin) return false;
+    this.unbindBookmarksPlugin();
+    if (current && typeof current.on === 'function') {
+      this._boundBookmarksPlugin = current;
+      this._bookmarksEventRef = current.on('changed', () => {
+        if (this.isClosed || !this.store) return;
+        this.store.refreshBookmarks();
+        this.leftCol?.updateBookmarks();
+      });
+    }
+    return true;
+  }
+
   async forceReloadAll() {
     if (this.isClosed || !this.store) return;
+    this.syncBookmarksBinding();
     this.spiralController.resetRenderedFlag();
     const ok = await this.store.loadAll();
     if (!ok || this.isClosed) return;
@@ -7171,7 +7699,7 @@ class CarrotHomeView extends ItemView {
     if (has('title') || has('showTitle')) this.stickyHeader.updateHero();
     if (has('showClock')) this.leftCol.updateClock();
     if (has('showCalendar')) this.leftCol.updateCalendar();
-    if (has('showBookmarks') || has('pinnedEntries')) this.leftCol.updateBookmarks();
+    if (has('showBookmarks')) this.leftCol.updateBookmarks();
     if (has('showRecent') || has('recentCount')) this.leftCol.updateRecent();
     if (has('showJournal')) this.journalCard.update();
     if (has('showTasks') || has('taskLayout') || has('showCompletedTasks') || has('taskDensity')) {
@@ -7240,6 +7768,9 @@ class CarrotHomeView extends ItemView {
       obsidian: Obsidian,
       store: this.store,
       onPathsChanged: (paths) => this.refreshPaths(paths),
+      onBookmarksChanged: () => {
+        if (!this.isClosed) this.leftCol?.updateBookmarks();
+      },
     });
 
     const getSettings = () => this.getSettings();
@@ -7350,10 +7881,21 @@ class CarrotHomeView extends ItemView {
     this.clockTimer = setInterval(() => this.leftCol?.updateClockDigits(), 15000);
     this.spiralMinuteTimer = setInterval(() => this.spiralController?.sync({ force: true }), 60 * 1000);
 
+    this.syncBookmarksBinding();
+
     if (this.app?.workspace?.on) {
       this.registerEvent(
         this.app.workspace.on('agent-deck:sessions-changed', () => {
           this.spiralController?.scheduleRender({ force: true });
+        })
+      );
+      this.registerEvent(
+        this.app.workspace.on('layout-change', () => {
+          if (this.isClosed || !this.store) return;
+          if (this.syncBookmarksBinding()) {
+            this.store.refreshBookmarks();
+            this.leftCol?.updateBookmarks();
+          }
         })
       );
     }
@@ -7370,13 +7912,24 @@ class CarrotHomeView extends ItemView {
       for (const evt of ['modify', 'create', 'delete']) {
         this.registerEvent(
           this.app.vault.on(evt, (file) => {
-            if (file && file.path) this.queueFileChange(evt, file.path);
+            if (!file || !file.path) return;
+            if ((evt === 'create' || evt === 'delete') && this.store?.hasBookmarkForPath(file.path)) {
+              this.store.refreshBookmarks();
+              this.leftCol?.updateBookmarks();
+            }
+            this.queueFileChange(evt, file.path);
           })
         );
       }
       this.registerEvent(
         this.app.vault.on('rename', (file, oldPath) => {
-          if (file && file.path) this.queueFileChange('rename', file.path, oldPath);
+          if (file && file.path) {
+            if (this.store?.hasBookmarkForPath(file.path) || this.store?.hasBookmarkForPath(oldPath)) {
+              this.store.refreshBookmarks();
+              this.leftCol?.updateBookmarks();
+            }
+            this.queueFileChange('rename', file.path, oldPath);
+          }
         })
       );
     }
@@ -7392,6 +7945,7 @@ class CarrotHomeView extends ItemView {
 
   async onClose() {
     this.isClosed = true;
+    this.unbindBookmarksPlugin();
     if (this.clockTimer) {
       clearInterval(this.clockTimer);
       this.clockTimer = null;

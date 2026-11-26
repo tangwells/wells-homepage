@@ -12,6 +12,7 @@ const {
 } = require('../utils/date');
 const { el, setIconSafe, preserveScroll } = require('../utils/dom');
 const { openFileAtLine } = require('../services/vault-adapter');
+const { getBookmarkIcon } = require('../services/bookmarks-adapter');
 
 function createLeftColumnSection({
   app,
@@ -251,6 +252,8 @@ function createLeftColumnSection({
   function updateBookmarks() {
     const settings = getSettings();
     const state = store.state;
+    const prevList = bookmarksSlot.querySelector('.ch-bm-list');
+    const prevListTop = prevList && typeof prevList.scrollTop === 'number' ? prevList.scrollTop : 0;
 
     preserveScroll(getScrollEl(), () => {
       bookmarksSlot.replaceChildren();
@@ -266,58 +269,136 @@ function createLeftColumnSection({
       titleWrap.appendChild(el('span', 'ch-card-accent-bar'));
       titleWrap.appendChild(el('h3', 'ch-card-title', '书签'));
       head.appendChild(titleWrap);
-      const addPinBtn = el('button', 'ch-mini-pill-btn', '+ 添加');
-      addPinBtn.addEventListener('click', modals.openAddPinModal);
-      head.appendChild(addPinBtn);
+
+      const addBmBtn = el('button', 'ch-mini-pill-btn', '+ 添加');
+      if (!state.bookmarksEnabled) {
+        addBmBtn.disabled = true;
+        addBmBtn.title = '请先启用 Obsidian 核心插件「书签」';
+      } else {
+        addBmBtn.addEventListener('click', modals.openAddBookmarkModal);
+      }
+      head.appendChild(addBmBtn);
       card.appendChild(head);
 
-      const list = el('div', 'ch-item-list');
-      list.appendChild(el('div', 'ch-sub-section-label', '工作台常用入口'));
-      for (const pin of settings.pinnedEntries) {
-        const row = el('div', 'ch-list-row');
-        const left = el('div', 'ch-list-row-left');
-        const ico = el('span', '');
-        ico.style.display = 'inline-flex';
-        setIconSafe(obsidian, ico, pin.icon || 'bookmark', '★');
-        left.appendChild(ico);
-        left.appendChild(el('span', 'ch-list-row-text', pin.label));
-        row.appendChild(left);
-
-        const del = el('button', 'ch-list-row-del', '×');
-        del.title = '移除入口';
-        del.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const next = getSettings().pinnedEntries.filter((x) => x.id !== pin.id);
-          updateSettings({ pinnedEntries: next });
-        });
-        row.appendChild(del);
-        row.addEventListener('click', () => store.actions?.triggerPinnedEntry(pin));
-        list.appendChild(row);
+      if (!state.bookmarksEnabled) {
+        card.appendChild(el('div', 'ch-empty ch-bm-disabled', '请先启用 Obsidian 核心插件「书签」'));
+        bookmarksSlot.appendChild(card);
+        return;
       }
 
-      if (state.obsidianBookmarks.length > 0) {
-        list.appendChild(el('div', 'ch-sub-section-label', 'Obsidian 原生书签'));
-        for (const bm of state.obsidianBookmarks.slice(0, 12)) {
-          const row = el('div', 'ch-list-row');
-          const left = el('div', 'ch-list-row-left');
-          const ico = el('span', '');
-          ico.style.display = 'inline-flex';
-          setIconSafe(obsidian, ico, bm.type === 'search' ? 'search' : 'bookmark', '🔖');
-          left.appendChild(ico);
-          left.appendChild(el('span', 'ch-list-row-text', bm.title));
-          row.appendChild(left);
-          row.addEventListener('click', () => {
-            if (bm.path) {
-              app.workspace.openLinkText(bm.subpath ? `${bm.path}${bm.subpath}` : bm.path, '', false);
-            } else if (bm.query) {
-              app.internalPlugins?.plugins?.['global-search']?.instance?.openGlobalSearch?.(bm.query);
+      if (!Array.isArray(state.bookmarkTree) || state.bookmarkTree.length === 0) {
+        card.appendChild(el('div', 'ch-empty', '暂无书签，点击右上角「+ 添加」或在 Obsidian 书签面板中添加'));
+        bookmarksSlot.appendChild(card);
+        return;
+      }
+
+      const list = el('div', 'ch-item-list ch-bm-list');
+
+      const renderNodes = (nodes) => {
+        for (const node of nodes) {
+          if (node.type === 'group') {
+            const isCollapsed = state.bookmarkCollapsed.has(node.key);
+            const row = el('div', 'ch-list-row ch-bm-group-row');
+            row.style.paddingLeft = `${7 + node.depth * 14}px`;
+            row.dataset.bookmarkKey = node.key;
+
+            const left = el('div', 'ch-list-row-left');
+            left.appendChild(el('span', 'ch-bm-chevron', isCollapsed ? '▸' : '▾'));
+            const ico = el('span', 'ch-bm-icon');
+            ico.style.display = 'inline-flex';
+            setIconSafe(obsidian, ico, 'folder', '📁');
+            left.appendChild(ico);
+            left.appendChild(el('span', 'ch-list-row-text', node.title));
+            row.appendChild(left);
+
+            if (node.leafCount > 0) {
+              row.appendChild(el('span', 'ch-count-muted', String(node.leafCount)));
             }
-          });
-          list.appendChild(row);
+
+            const del = el('button', 'ch-list-row-del', '×');
+            del.title = '删除分组';
+            del.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (node.directCount === 0) {
+                store.actions?.removeBookmark(node);
+              } else {
+                modals.openConfirmDeleteBookmarkGroupModal(node);
+              }
+            });
+            row.appendChild(del);
+
+            row.addEventListener('click', () => {
+              if (state.bookmarkCollapsed.has(node.key)) {
+                state.bookmarkCollapsed.delete(node.key);
+              } else {
+                state.bookmarkCollapsed.add(node.key);
+              }
+              updateBookmarks();
+            });
+            list.appendChild(row);
+
+            if (!isCollapsed && node.children.length > 0) {
+              renderNodes(node.children);
+            }
+          } else {
+            const row = el('div', `ch-list-row ch-bm-item-row${node.broken ? ' is-broken' : ''}`);
+            row.style.paddingLeft = `${7 + node.depth * 14}px`;
+            row.dataset.bookmarkKey = node.key;
+
+            const left = el('div', 'ch-list-row-left');
+            const { icon, fallback } = getBookmarkIcon(node.type);
+            const ico = el('span', 'ch-bm-icon');
+            ico.style.display = 'inline-flex';
+            setIconSafe(obsidian, ico, icon, fallback);
+            left.appendChild(ico);
+            left.appendChild(el('span', 'ch-list-row-text', node.title));
+            row.appendChild(left);
+
+            const del = el('button', 'ch-list-row-del', '×');
+            del.title = '移除书签';
+            del.addEventListener('click', (e) => {
+              e.stopPropagation();
+              store.actions?.removeBookmark(node);
+            });
+            row.appendChild(del);
+
+            if (node.broken) {
+              row.title = `目标文件或文件夹不存在：${node.path}`;
+            } else if (node.type === 'file') {
+              row.title = `${node.path}${node.subpath || ''}`;
+            } else if (node.type === 'folder') {
+              row.title = node.path;
+            } else if (node.type === 'search') {
+              row.title = node.query;
+            } else if (node.type === 'url') {
+              row.title = node.url;
+            } else {
+              row.title = node.title;
+            }
+
+            row.addEventListener('click', (e) => {
+              const isMod = Boolean(
+                obsidian?.Keymap?.isModEvent ? obsidian.Keymap.isModEvent(e) : (e.metaKey || e.ctrlKey)
+              );
+              void store.actions?.openBookmark(node, isMod);
+            });
+            row.addEventListener('auxclick', (e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                void store.actions?.openBookmark(node, true);
+              }
+            });
+            list.appendChild(row);
+          }
         }
-      }
+      };
+
+      renderNodes(state.bookmarkTree);
       card.appendChild(list);
       bookmarksSlot.appendChild(card);
+      if (prevListTop > 0) {
+        list.scrollTop = prevListTop;
+      }
     });
   }
 

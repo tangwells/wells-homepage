@@ -233,7 +233,7 @@ class CarrotHomeView extends ItemView {
     if (has('showTasks') || has('taskLayout') || has('showCompletedTasks') || has('taskDensity')) {
       this.tasksCard.update();
     }
-    if (has('showGantt') || has('ganttZoom') || has('ganttStatusFilter')) {
+    if (has('showGantt') || has('ganttZoom')) {
       this.ganttCard.update();
     }
   }

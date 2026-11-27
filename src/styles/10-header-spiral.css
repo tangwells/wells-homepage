@@ -122,7 +122,8 @@
   min-width: 0;
 }
 
-.ch-root button.ch-sticky-meta-tag {
+.ch-root button.ch-sticky-meta-tag,
+.ch-root span.ch-sticky-meta-tag.is-static {
   padding: 1px 6px;
   border-radius: 999px;
   font-size: 9.5px;
@@ -134,9 +135,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
   border: 1px solid transparent;
+}
+
+.ch-root button.ch-sticky-meta-tag {
+  cursor: pointer;
   transition: background 0.14s, border-color 0.14s, color 0.14s;
+}
+
+.ch-root span.ch-sticky-meta-tag.is-static {
+  display: inline-block;
+  cursor: default;
+  background: var(--ch-surface-subtle);
+  border-color: var(--ch-border);
+  color: var(--ch-text-faint);
 }
 
 .ch-root button.ch-sticky-meta-tag.is-area {
@@ -193,10 +205,10 @@
   color: #fff;
 }
 
-/* ---- 顶部两栏头部（左：工作台标题与搜索；右：螺旋日程） ---- */
+/* ---- 顶部两栏头部（左：螺旋日程；右：工作台标题与搜索） ---- */
 .ch-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
 }
@@ -206,8 +218,12 @@
 }
 
 .ch-root.ch-medium .ch-header {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 16px;
+}
+
+.ch-root.ch-medium .ch-header.no-spiral {
+  grid-template-columns: 1fr;
 }
 
 .ch-root.ch-narrow .ch-header {
@@ -370,7 +386,7 @@
   color: var(--ch-accent-strong);
 }
 
-/* ---- 左栏顶部：标题 + 搜索 + 快捷图标 ---- */
+/* ---- 右栏顶部：标题 + 搜索 + 快捷图标 ---- */
 .ch-hero-center {
   display: flex;
   flex-direction: column;
@@ -544,7 +560,7 @@
   height: 16px;
 }
 
-/* ---- 右栏顶部：嵌入 Nautilus Spiral 螺旋日程图 ---- */
+/* ---- 左栏顶部：嵌入 Nautilus Spiral 螺旋日程图 ---- */
 .ch-focus-zone {
   display: flex;
   justify-content: center;
@@ -698,8 +714,8 @@
   z-index: 40;
   width: 260px;
   max-width: calc(100vw - 32px);
-  left: auto;
-  right: 0;
+  left: 0;
+  right: auto;
 }
 
 .ch-spiral-shell .naut-svg {

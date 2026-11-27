@@ -236,6 +236,7 @@
 }
 
 .ch-root.ch-compact .ch-sticky-zone,
+.ch-root.ch-compact .ch-focus-slot,
 .ch-root.ch-compact .ch-focus-zone {
   display: none;
 }

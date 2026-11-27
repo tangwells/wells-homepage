@@ -123,7 +123,7 @@ class CarrotHomeSettingTab extends PluginSettingTab {
     const toggles = [
       ['显示大标题', 'showTitle'],
       ['显示顶部「随手晾晾」', 'showStickyNotes'],
-      ['显示右上「螺旋日程」螺旋图', 'showFocusDial'],
+      ['显示左上「螺旋日程」螺旋图', 'showFocusDial'],
       ['显示时钟卡片', 'showClock'],
       ['显示日历卡片', 'showCalendar'],
       ['显示书签卡片', 'showBookmarks'],

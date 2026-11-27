@@ -27,7 +27,6 @@ const DEFAULT_SETTINGS = {
   taskLayout: 'kanban',
   showCompletedTasks: true,
   ganttZoom: 'month',
-  ganttStatusFilter: 'doing',
   stickyFolded: false,
   focusFolded: false,
   // 主页生命周期接管（替代 Components homepage 设置）

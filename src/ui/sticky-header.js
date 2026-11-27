@@ -7,7 +7,7 @@ const {
   isInteractiveMarkdownTarget,
   createMarkdownRenderScope,
 } = require('../utils/markdown-render');
-const { extractStickyMetaTags, stripDomainProjectTags } = require('../parsers/markdown');
+const { extractStickyMetaTags, collectDoingProjectLabels, stripDomainProjectTags } = require('../parsers/markdown');
 const { ensureNoteFromTemplate, openFileAtLine, runQuickAddChoice, runObsidianCommand } = require('../services/vault-adapter');
 
 function createStickyHeaderSection({
@@ -29,8 +29,8 @@ function createStickyHeaderSection({
   const focusZoneSlot = el('div', 'ch-focus-slot');
   const heroSlot = el('div', 'ch-hero-slot');
   const headerEl = el('div', 'ch-header');
-  headerEl.appendChild(heroSlot);
   headerEl.appendChild(focusZoneSlot);
+  headerEl.appendChild(heroSlot);
   headerSlot.appendChild(headerEl);
 
   function computeSearchResults(query) {
@@ -87,6 +87,10 @@ function createStickyHeaderSection({
 
       const stickyZone = el('div', 'ch-sticky-zone');
       const pinnedImportants = state.importants || [];
+      const doingProjectLabels = collectDoingProjectLabels(state.projects);
+      if (state.stickyProjectFilter && !doingProjectLabels.has(state.stickyProjectFilter)) {
+        state.stickyProjectFilter = '';
+      }
       const areaFilter = state.stickyAreaFilter || '';
       const projectFilter = state.stickyProjectFilter || '';
       const isFiltered = Boolean(areaFilter || projectFilter);
@@ -108,6 +112,7 @@ function createStickyHeaderSection({
           areaCounts.set(areaName, (areaCounts.get(areaName) || 0) + 1);
         }
         for (const projName of new Set(meta.filterProjects)) {
+          if (!doingProjectLabels.has(projName)) continue;
           projectCounts.set(projName, (projectCounts.get(projName) || 0) + 1);
         }
       }
@@ -205,19 +210,25 @@ function createStickyHeaderSection({
             container.appendChild(btn);
           }
           for (const p of meta.projects) {
-            const btn = el(
-              'button',
-              `ch-sticky-meta-tag is-project${projectFilter === p.label ? ' is-active' : ''}`,
-              p.label
-            );
-            btn.type = 'button';
-            btn.title = `项目 ${p.raw} · 点击按此项目筛选`;
-            btn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              state.stickyProjectFilter = state.stickyProjectFilter === p.label ? '' : p.label;
-              updateSticky();
-            });
-            container.appendChild(btn);
+            if (doingProjectLabels.has(p.label)) {
+              const btn = el(
+                'button',
+                `ch-sticky-meta-tag is-project${projectFilter === p.label ? ' is-active' : ''}`,
+                p.label
+              );
+              btn.type = 'button';
+              btn.title = `项目 ${p.raw} · 点击按此项目筛选`;
+              btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                state.stickyProjectFilter = state.stickyProjectFilter === p.label ? '' : p.label;
+                updateSticky();
+              });
+              container.appendChild(btn);
+            } else {
+              const tagEl = el('span', 'ch-sticky-meta-tag is-project is-static', p.label);
+              tagEl.title = `项目 ${p.raw}（非进行中）`;
+              container.appendChild(tagEl);
+            }
           }
         };
 
@@ -348,7 +359,7 @@ function createStickyHeaderSection({
 
         const projectSelect = el('select', `ch-sticky-filter-select${projectFilter ? ' is-active' : ''}`);
         projectSelect.setAttribute('data-filter', 'project');
-        projectSelect.title = '按项目筛选';
+        projectSelect.title = '按进行中项目筛选';
         const projAllOpt = el('option', '', '全部项目');
         projAllOpt.value = '';
         projectSelect.appendChild(projAllOpt);

@@ -37,7 +37,6 @@ function normalizeSettings(rawOptions, localOverrides) {
     taskLayout: ['kanban', 'list'].includes(merged.taskLayout) ? merged.taskLayout : 'kanban',
     showCompletedTasks: merged.showCompletedTasks !== false,
     ganttZoom: ['day', 'week', 'month'].includes(merged.ganttZoom) ? merged.ganttZoom : 'month',
-    ganttStatusFilter: ['all', 'doing', 'done', 'overdue'].includes(merged.ganttStatusFilter) ? merged.ganttStatusFilter : 'doing',
     stickyFolded: Boolean(merged.stickyFolded),
     focusFolded: Boolean(merged.focusFolded),
     openOnStartup: merged.openOnStartup !== false,

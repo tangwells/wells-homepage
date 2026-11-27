@@ -652,7 +652,7 @@ function createModalManager(ctx) {
 
       addToggle('显示大标题', 'showTitle');
       addToggle('显示顶部「随手晾晾」', 'showStickyNotes');
-      addToggle('显示右上「螺旋日程」螺旋图', 'showFocusDial');
+      addToggle('显示左上「螺旋日程」螺旋图', 'showFocusDial');
       addToggle('显示时钟卡片', 'showClock');
       addToggle('显示日历卡片', 'showCalendar');
       addToggle('显示书签卡片', 'showBookmarks');

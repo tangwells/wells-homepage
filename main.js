@@ -33,7 +33,6 @@ const DEFAULT_SETTINGS = {
   taskLayout: 'kanban',
   showCompletedTasks: true,
   ganttZoom: 'month',
-  ganttStatusFilter: 'doing',
   stickyFolded: false,
   focusFolded: false,
   // 主页生命周期接管（替代 Components homepage 设置）
@@ -1448,6 +1447,27 @@ function extractStickyMetaTags(item) {
   };
 }
 
+function collectDoingProjectLabels(projects) {
+  const labels = new Set();
+  if (!Array.isArray(projects)) return labels;
+  for (const proj of projects) {
+    if (!proj || proj.status !== 'doing') continue;
+    const name = String(proj.name || '').trim();
+    if (name) labels.add(name);
+    if (Array.isArray(proj.aliases)) {
+      for (const al of proj.aliases) {
+        const clean = String(al || '')
+          .trim()
+          .replace(/^#/, '')
+          .replace(/^(?:Project|项目)\//, '')
+          .trim();
+        if (clean) labels.add(clean);
+      }
+    }
+  }
+  return labels;
+}
+
 function stripDomainProjectTags(markdown) {
   const placeholders = [];
   const protectedStr = String(markdown || '').replace(
@@ -1619,6 +1639,7 @@ module.exports = {
   extractInlineTags,
   cleanTaskTitle,
   extractStickyMetaTags,
+  collectDoingProjectLabels,
   stripDomainProjectTags,
   mapStatusChar,
   parseTaskLine,
@@ -2572,6 +2593,7 @@ class VaultDataStore {
       journalData: emptyJournalData(`06_日志/${todayStr}.md`),
       journalExpandState: new Map(),
       ganttSearch: '',
+      ganttStatusFilter: 'doing', // doing | all | overdue | done
       ganttExpanded: new Set(),
       ganttScrollLeft: null,
       searchMode: 'note', // note | command
@@ -2645,6 +2667,14 @@ class VaultDataStore {
       map.set('Project/' + p0.name, p0);
     }
     this.projectByTagName = map;
+  }
+
+  _getDoingProjectFilterSignature() {
+    return (this.state.projects || [])
+      .filter((p) => p.status === 'doing')
+      .map((p) => `${p.filePath}|${p.name}|${(p.aliases || []).join(',')}`)
+      .sort()
+      .join('\n');
   }
 
   _recomputeAllProjectsFromCache() {
@@ -2910,8 +2940,12 @@ class VaultDataStore {
     }
 
     if (projectsDirty) {
+      const prevDoingSig = this._getDoingProjectFilterSignature();
       this._recomputeAllProjectsFromCache();
       dirty.gantt = true;
+      if (this._getDoingProjectFilterSignature() !== prevDoingSig) {
+        dirty.sticky = true;
+      }
     }
 
     // 仅重读真正变更的 06_日志 单文件
@@ -4117,7 +4151,7 @@ function createGanttCardSection({
 
     for (const [sk, btn] of statusPillButtons.entries()) {
       btn.textContent = `${labels[sk]} ${statusCounts[sk]}`;
-      btn.classList.toggle('is-active', settings.ganttStatusFilter === sk);
+      btn.classList.toggle('is-active', state.ganttStatusFilter === sk);
     }
 
     if (searchInput && searchInput.value !== state.ganttSearch) {
@@ -4140,9 +4174,9 @@ function createGanttCardSection({
     const isOverdueProj = (p) => p.status !== 'done' && Boolean(p.projEnd) && p.projEnd < today;
     const q = state.ganttSearch.trim().toLowerCase();
     const list = nonCancelled.filter((p) => {
-      if (settings.ganttStatusFilter === 'doing' && p.status !== 'doing') return false;
-      if (settings.ganttStatusFilter === 'done' && p.status !== 'done') return false;
-      if (settings.ganttStatusFilter === 'overdue' && !isOverdueProj(p)) return false;
+      if (state.ganttStatusFilter === 'doing' && p.status !== 'doing') return false;
+      if (state.ganttStatusFilter === 'done' && p.status !== 'done') return false;
+      if (state.ganttStatusFilter === 'overdue' && !isOverdueProj(p)) return false;
       if (q) {
         const hay = `${p.name} ${p.area} ${p.tasks.map((t) => t.title).join(' ')}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -4716,9 +4750,9 @@ function createGanttCardSection({
 
     statusPillsWrap = el('div', 'ch-pills-row');
     for (const [sk, sl] of [['all', '全部'], ['doing', '进行中'], ['overdue', '逾期'], ['done', '已完成']]) {
-      const p = el('button', `ch-pill ${settings.ganttStatusFilter === sk ? 'is-active' : ''}`, `${sl} 0`);
+      const p = el('button', `ch-pill ${state.ganttStatusFilter === sk ? 'is-active' : ''}`, `${sl} 0`);
       p.addEventListener('click', () => {
-        updateSettings({ ganttStatusFilter: sk }, { skipModuleRefresh: true });
+        state.ganttStatusFilter = sk;
         syncToolbarControls();
         renderGanttGrid();
       });
@@ -6166,7 +6200,7 @@ function createModalManager(ctx) {
 
       addToggle('显示大标题', 'showTitle');
       addToggle('显示顶部「随手晾晾」', 'showStickyNotes');
-      addToggle('显示右上「螺旋日程」螺旋图', 'showFocusDial');
+      addToggle('显示左上「螺旋日程」螺旋图', 'showFocusDial');
       addToggle('显示时钟卡片', 'showClock');
       addToggle('显示日历卡片', 'showCalendar');
       addToggle('显示书签卡片', 'showBookmarks');
@@ -6327,7 +6361,7 @@ class CarrotHomeSettingTab extends PluginSettingTab {
     const toggles = [
       ['显示大标题', 'showTitle'],
       ['显示顶部「随手晾晾」', 'showStickyNotes'],
-      ['显示右上「螺旋日程」螺旋图', 'showFocusDial'],
+      ['显示左上「螺旋日程」螺旋图', 'showFocusDial'],
       ['显示时钟卡片', 'showClock'],
       ['显示日历卡片', 'showCalendar'],
       ['显示书签卡片', 'showBookmarks'],
@@ -6362,7 +6396,7 @@ const {
   isInteractiveMarkdownTarget,
   createMarkdownRenderScope,
 } = require('../utils/markdown-render');
-const { extractStickyMetaTags, stripDomainProjectTags } = require('../parsers/markdown');
+const { extractStickyMetaTags, collectDoingProjectLabels, stripDomainProjectTags } = require('../parsers/markdown');
 const { ensureNoteFromTemplate, openFileAtLine, runQuickAddChoice, runObsidianCommand } = require('../services/vault-adapter');
 
 function createStickyHeaderSection({
@@ -6384,8 +6418,8 @@ function createStickyHeaderSection({
   const focusZoneSlot = el('div', 'ch-focus-slot');
   const heroSlot = el('div', 'ch-hero-slot');
   const headerEl = el('div', 'ch-header');
-  headerEl.appendChild(heroSlot);
   headerEl.appendChild(focusZoneSlot);
+  headerEl.appendChild(heroSlot);
   headerSlot.appendChild(headerEl);
 
   function computeSearchResults(query) {
@@ -6442,6 +6476,10 @@ function createStickyHeaderSection({
 
       const stickyZone = el('div', 'ch-sticky-zone');
       const pinnedImportants = state.importants || [];
+      const doingProjectLabels = collectDoingProjectLabels(state.projects);
+      if (state.stickyProjectFilter && !doingProjectLabels.has(state.stickyProjectFilter)) {
+        state.stickyProjectFilter = '';
+      }
       const areaFilter = state.stickyAreaFilter || '';
       const projectFilter = state.stickyProjectFilter || '';
       const isFiltered = Boolean(areaFilter || projectFilter);
@@ -6463,6 +6501,7 @@ function createStickyHeaderSection({
           areaCounts.set(areaName, (areaCounts.get(areaName) || 0) + 1);
         }
         for (const projName of new Set(meta.filterProjects)) {
+          if (!doingProjectLabels.has(projName)) continue;
           projectCounts.set(projName, (projectCounts.get(projName) || 0) + 1);
         }
       }
@@ -6560,19 +6599,25 @@ function createStickyHeaderSection({
             container.appendChild(btn);
           }
           for (const p of meta.projects) {
-            const btn = el(
-              'button',
-              `ch-sticky-meta-tag is-project${projectFilter === p.label ? ' is-active' : ''}`,
-              p.label
-            );
-            btn.type = 'button';
-            btn.title = `项目 ${p.raw} · 点击按此项目筛选`;
-            btn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              state.stickyProjectFilter = state.stickyProjectFilter === p.label ? '' : p.label;
-              updateSticky();
-            });
-            container.appendChild(btn);
+            if (doingProjectLabels.has(p.label)) {
+              const btn = el(
+                'button',
+                `ch-sticky-meta-tag is-project${projectFilter === p.label ? ' is-active' : ''}`,
+                p.label
+              );
+              btn.type = 'button';
+              btn.title = `项目 ${p.raw} · 点击按此项目筛选`;
+              btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                state.stickyProjectFilter = state.stickyProjectFilter === p.label ? '' : p.label;
+                updateSticky();
+              });
+              container.appendChild(btn);
+            } else {
+              const tagEl = el('span', 'ch-sticky-meta-tag is-project is-static', p.label);
+              tagEl.title = `项目 ${p.raw}（非进行中）`;
+              container.appendChild(tagEl);
+            }
           }
         };
 
@@ -6703,7 +6748,7 @@ function createStickyHeaderSection({
 
         const projectSelect = el('select', `ch-sticky-filter-select${projectFilter ? ' is-active' : ''}`);
         projectSelect.setAttribute('data-filter', 'project');
-        projectSelect.title = '按项目筛选';
+        projectSelect.title = '按进行中项目筛选';
         const projAllOpt = el('option', '', '全部项目');
         projAllOpt.value = '';
         projectSelect.appendChild(projAllOpt);
@@ -8017,7 +8062,6 @@ function normalizeSettings(rawOptions, localOverrides) {
     taskLayout: ['kanban', 'list'].includes(merged.taskLayout) ? merged.taskLayout : 'kanban',
     showCompletedTasks: merged.showCompletedTasks !== false,
     ganttZoom: ['day', 'week', 'month'].includes(merged.ganttZoom) ? merged.ganttZoom : 'month',
-    ganttStatusFilter: ['all', 'doing', 'done', 'overdue'].includes(merged.ganttStatusFilter) ? merged.ganttStatusFilter : 'doing',
     stickyFolded: Boolean(merged.stickyFolded),
     focusFolded: Boolean(merged.focusFolded),
     openOnStartup: merged.openOnStartup !== false,
@@ -8268,7 +8312,7 @@ class CarrotHomeView extends ItemView {
     if (has('showTasks') || has('taskLayout') || has('showCompletedTasks') || has('taskDensity')) {
       this.tasksCard.update();
     }
-    if (has('showGantt') || has('ganttZoom') || has('ganttStatusFilter')) {
+    if (has('showGantt') || has('ganttZoom')) {
       this.ganttCard.update();
     }
   }

@@ -82,6 +82,7 @@ class VaultDataStore {
       journalData: emptyJournalData(`06_日志/${todayStr}.md`),
       journalExpandState: new Map(),
       ganttSearch: '',
+      ganttStatusFilter: 'doing', // doing | all | overdue | done
       ganttExpanded: new Set(),
       ganttScrollLeft: null,
       searchMode: 'note', // note | command
@@ -155,6 +156,14 @@ class VaultDataStore {
       map.set('Project/' + p0.name, p0);
     }
     this.projectByTagName = map;
+  }
+
+  _getDoingProjectFilterSignature() {
+    return (this.state.projects || [])
+      .filter((p) => p.status === 'doing')
+      .map((p) => `${p.filePath}|${p.name}|${(p.aliases || []).join(',')}`)
+      .sort()
+      .join('\n');
   }
 
   _recomputeAllProjectsFromCache() {
@@ -420,8 +429,12 @@ class VaultDataStore {
     }
 
     if (projectsDirty) {
+      const prevDoingSig = this._getDoingProjectFilterSignature();
       this._recomputeAllProjectsFromCache();
       dirty.gantt = true;
+      if (this._getDoingProjectFilterSignature() !== prevDoingSig) {
+        dirty.sticky = true;
+      }
     }
 
     // 仅重读真正变更的 06_日志 单文件

@@ -779,7 +779,7 @@ function createMockApp(initialFiles) {
 function testParsersAndUtils() {
   const { formatDateYMD, parseYMD, addDaysYMD, diffDaysYMD, getIsoWeekInfo, renderTemplateText } = require('../src/utils/date');
   const { normalizeSettings } = require('../src/utils/settings');
-  const { splitFrontmatter, buildLineFlags, scanMarkdownTasks } = require('../src/parsers/markdown');
+  const { splitFrontmatter, buildLineFlags, scanMarkdownTasks, collectDoingProjectLabels } = require('../src/parsers/markdown');
   const {
     planDailyEntryInsertion,
     buildFlashEntryLine,
@@ -871,12 +871,19 @@ function testParsersAndUtils() {
   assert.ok(tplOut.includes('mon: 2026-11-23 sun: 2026-11-29'));
   assert.ok(tplOut.includes('d2: 2026-11-25 d0: 2026W48 t: 09:05'));
 
-  // 设置规范化（并静默忽略遗留 pinnedEntries）
-  const norm = normalizeSettings({ cardBlur: 10, ganttZoom: 'invalid', openOnStartup: false, pinnedEntries: [{ id: 'old' }] });
+  // 设置规范化（并静默忽略遗留 pinnedEntries / ganttStatusFilter）
+  const norm = normalizeSettings({
+    cardBlur: 10,
+    ganttZoom: 'invalid',
+    ganttStatusFilter: 'all',
+    openOnStartup: false,
+    pinnedEntries: [{ id: 'old' }],
+  });
   assert.strictEqual(norm.cardBlur, 10);
   assert.strictEqual(norm.ganttZoom, 'month');
   assert.strictEqual(norm.openOnStartup, false);
   assert.strictEqual('pinnedEntries' in norm, false, '应忽略遗留 pinnedEntries 字段');
+  assert.strictEqual('ganttStatusFilter' in norm, false, '应忽略遗留 ganttStatusFilter 字段');
 
   // 书签适配层单元测试
   const {
@@ -1066,6 +1073,14 @@ function testParsersAndUtils() {
 
   // 螺旋图 offset
   assert.strictEqual(computeSpiralOffset({ today: () => ({ format: () => '2026-11-26' }) }, '2026-11-24'), -2);
+
+  // 闪念项目筛选仅保留进行中的项目标签与名称
+  const doingLabels = collectDoingProjectLabels([
+    { status: 'doing', name: 'PMP 考试', aliases: ['#Project/PMP考试'] },
+    { status: 'done', name: '25 年春季求职', aliases: ['#Project/求职'] },
+    { status: 'cancel', name: '考研', aliases: ['#Project/考研'] },
+  ]);
+  assert.deepStrictEqual(Array.from(doingLabels).sort(), ['PMP 考试', 'PMP考试']);
 }
 
 // ======================== 2. 增量缓存 VaultDataStore 测试 ========================
@@ -1094,6 +1109,12 @@ async function testIncrementalStore() {
   assert.strictEqual(dProj.journal, false);
   assert.strictEqual(dProj.sticky, false);
   assert.strictEqual(store.state.projects[0].doneCount, 1);
+
+  // Case A2: 项目状态从 doing 变为 done -> 应标记 gantt + sticky
+  app._addOrUpdateFile('04_Project/P25_2.md', '---\ntags: [done]\n---\n(name:: 项目P25)\n# 规划\n- [x] 任务A ⏳ 2026-11-24 📅 2026-11-28 ✅ 2026-11-26\n', 1003);
+  const dProjDone = await store.handleBatchChanges([{ type: 'modify', path: '04_Project/P25_2.md' }]);
+  assert.strictEqual(dProjDone.gantt, true);
+  assert.strictEqual(dProjDone.sticky, true, '项目完成应触发随手晾晾项目筛选列表刷新');
 
   // Case B: 修改单个日志文件 -> 只读 1 次，且不标记 gantt
   app._resetCachedReadCount();
@@ -1172,11 +1193,30 @@ async function testBundledPluginAndScrollPreservation() {
     '04_Project/P1.md': [
       '---',
       'tags: [doing]',
+      'aliases: ["#Project/核心"]',
       '---',
       '(name:: 核心项目)',
       '# 规划',
       `- [/] 前置任务 ⏳ ${todayYmd} 📅 ${todayYmd}`,
       `- [ ] 后续任务 ⏳ ${todayYmd} 📅 ${todayYmd}`,
+    ].join('\n'),
+    '04_Project/P2_done.md': [
+      '---',
+      'tags: [done]',
+      'aliases: ["#Project/已完结"]',
+      '---',
+      '(name:: 已完结项目)',
+      '# 规划',
+      '- [x] 收尾归档',
+    ].join('\n'),
+    '04_Project/P3_cancel.md': [
+      '---',
+      'tags: [cancel]',
+      'aliases: ["#Project/已取消"]',
+      '---',
+      '(name:: 已取消项目)',
+      '# 规划',
+      '- [-] 已作废任务',
     ].join('\n'),
     [`06_日志/${todayYmd}.md`]: [
       '## 今日执行',
@@ -1190,6 +1230,8 @@ async function testBundledPluginAndScrollPreservation() {
       '## 上午',
       '- [I] **09:00** 测试 **闪念粗体**<br>第二行 #闪念标签 [[P1|项目1]]',
       '- [I] **09:05** 测试闪念2',
+      '- [I] **09:06** 已完结项目闪念 #Project/已完结',
+      '- [I] **09:07** 已取消项目闪念 #Project/已取消',
       '## 下午',
       '- **14:00** 下午测试条目',
       '## 晚上',
@@ -1239,6 +1281,7 @@ async function testBundledPluginAndScrollPreservation() {
   }
 
   const plugin = new CarrotHomePlugin(app, { id: 'carrot-home' });
+  plugin.loadData = async () => ({ ganttStatusFilter: 'all' });
   await plugin.onload();
 
   assert.ok(plugin._views.has('carrot-home-view'), '应注册 carrot-home-view');
@@ -1263,8 +1306,18 @@ async function testBundledPluginAndScrollPreservation() {
     assert.strictEqual(scrollRef.scrollTop, 640, `${label}: 垂直滚动条 scrollTop 不得跳回页首`);
   }
 
-  // 1) 甘特图缩放（日 / 周 / 月 / − / +）
+  // 1) 甘特图缩放（日 / 周 / 月 / − / +）与默认状态筛选（「进行中」）
   const ganttSlot = view.contentEl.querySelector('.ch-slot-gantt');
+  assert.strictEqual(view.store.state.ganttStatusFilter, 'doing', '甘特图默认筛选状态应为 doing');
+  assert.strictEqual('ganttStatusFilter' in plugin.settings, false, 'plugin.settings 不应保留 ganttStatusFilter');
+  const getGanttPill = (prefix) => ganttSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith(prefix));
+  const getGanttProjNames = () => ganttSlot.querySelectorAll('.ch-gantt-proj-name').map((el) => el.textContent);
+  assert.strictEqual(getGanttPill('进行中')?.textContent, '进行中 1');
+  assert.strictEqual(getGanttPill('进行中')?.classList.contains('is-active'), true, '默认应高亮进行中筛选按钮');
+  assert.strictEqual(getGanttPill('全部')?.textContent, '全部 2');
+  assert.strictEqual(getGanttPill('全部')?.classList.contains('is-active'), false, '即使旧 data.json 为 all，默认也不得高亮全部');
+  assert.deepStrictEqual(getGanttProjNames(), ['核心项目'], '甘特图默认应仅展示进行中的项目');
+
   const ganttRight0 = ganttSlot.querySelector('.ch-gantt-right');
   ganttRight0.scrollLeft = 320;
   view.store.state.ganttScrollLeft = 320;
@@ -1279,13 +1332,19 @@ async function testBundledPluginAndScrollPreservation() {
 
   // 2) 甘特图状态筛选（全部 / 进行中 / 逾期 / 已完成）
   for (const prefix of ['全部', '进行中', '逾期', '已完成']) {
-    const pill = ganttSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith(prefix));
+    const pill = getGanttPill(prefix);
     assert.ok(pill, `应找到甘特图状态筛选 ${prefix}`);
     pill.click();
     assertScrollIntact(`甘特图状态筛选[${prefix}]`);
   }
+  getGanttPill('全部').click();
+  assert.deepStrictEqual(getGanttProjNames(), ['核心项目', '已完结项目'], '切换全部后应展示所有非取消项目');
+  assert.strictEqual('ganttStatusFilter' in plugin.settings, false, '切换筛选不应写入 plugin.settings');
+  getGanttPill('已完成').click();
+  assert.deepStrictEqual(getGanttProjNames(), ['已完结项目'], '切换已完成后应仅展示已完成项目');
   // 切回进行中以便测试展开
-  ganttSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith('进行中')).click();
+  getGanttPill('进行中').click();
+  assert.deepStrictEqual(getGanttProjNames(), ['核心项目'], '切回进行中后应仅展示进行中项目');
 
   // 3) 甘特图展开项目 + 建立/断开依赖
   const expBtn = ganttSlot.querySelector('.ch-gantt-row-left .ch-tiny-icon-btn');
@@ -1344,6 +1403,29 @@ async function testBundledPluginAndScrollPreservation() {
   resetFilterBtn.click();
   assertScrollIntact('随手晾晾[清除筛选]');
   assert.ok(stickySlot.querySelectorAll('.ch-sticky-card').length >= 3, '清除筛选后应恢复显示所有便签');
+
+  // 随手晾晾项目筛选下拉框仅包含进行中的项目（排除已完成 / 已取消项目）
+  const projSelect = stickySlot.querySelector('select[data-filter="project"]');
+  assert.ok(projSelect, '应渲染项目筛选下拉框');
+  assert.deepStrictEqual(
+    projSelect.children.map((o) => o.value),
+    ['', '核心'],
+    '闪念项目筛选下拉框应仅包含进行中项目「核心」，不包含已完成或已取消项目'
+  );
+  const doneIdeaCard = stickySlot
+    .querySelectorAll('.ch-sticky-card')
+    .find((c) => c.querySelector('.ch-sticky-card-body')?.textContent.includes('已完结项目闪念'));
+  assert.ok(doneIdeaCard, '应渲染带已完成项目标签的闪念卡片');
+  const staticProjChip = doneIdeaCard.querySelector('.ch-sticky-meta-tag.is-project.is-static');
+  assert.ok(staticProjChip, '已完成项目的卡片标签应渲染为不可筛选的静态标签 .is-static');
+  assert.strictEqual(staticProjChip.tagName, 'SPAN', '非进行中项目标签应为 span 而非 button');
+  staticProjChip.click();
+  assert.strictEqual(view.store.state.stickyProjectFilter, '', '点击非进行中项目标签不得激活筛选');
+
+  // 若选中的项目不再处于进行中，刷新时应自动清空 stickyProjectFilter
+  view.store.state.stickyProjectFilter = '已完结';
+  view.stickyHeader.updateSticky();
+  assert.strictEqual(view.store.state.stickyProjectFilter, '', '非进行中项目的筛选条件应自动清空');
 
   // 点击便签内部双链 -> 打开链接，不触发整张便签打开文件
   const stickyLink = impBody.querySelector('a.internal-link');
@@ -1433,6 +1515,14 @@ async function testBundledPluginAndScrollPreservation() {
   assert.ok(bundledCss.includes('order: 2;'), 'styles.css 窄屏日注应排在 order: 2');
   assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-slot-calendar'), 'styles.css 应包含窄屏日历排序规则');
   assert.ok(bundledCss.includes('order: 3;'), 'styles.css 窄屏日历应排在 order: 3');
+  const headerEl = view.contentEl.querySelector('.ch-header');
+  assert.ok(headerEl && headerEl.children.length === 2, '顶部 .ch-header 应包含 2 个子槽位');
+  assert.ok(headerEl.children[0].classList.contains('ch-focus-slot'), '顶部左栏应为螺旋日程槽位 .ch-focus-slot');
+  assert.ok(headerEl.children[1].classList.contains('ch-hero-slot'), '顶部右栏应为工作台标题搜索槽位 .ch-hero-slot');
+  assert.ok(bundledCss.includes('grid-template-columns: auto minmax(0, 1fr);'), 'styles.css 顶部两栏应为 auto minmax(0, 1fr)');
+  assert.strictEqual(bundledCss.includes('grid-template-columns: minmax(0, 1fr) auto;'), false, 'styles.css 不应保留旧的 minmax(0, 1fr) auto 顺序');
+  assert.ok(bundledCss.includes('.ch-root.ch-medium .ch-header.no-spiral'), 'styles.css 应包含中屏隐藏螺旋图时的单栏覆盖');
+  assert.ok(bundledCss.includes('left: 0;\n  right: auto;'), 'styles.css 螺旋图 AI 悬停卡片应向右展开');
 
   const execTitle = tasksSlot.querySelector('.ch-task-title');
   assert.ok(execTitle.querySelector('strong')?.textContent === '重点', '任务标题应渲染粗体');

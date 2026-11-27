@@ -66,7 +66,7 @@ function createGanttCardSection({
 
     for (const [sk, btn] of statusPillButtons.entries()) {
       btn.textContent = `${labels[sk]} ${statusCounts[sk]}`;
-      btn.classList.toggle('is-active', settings.ganttStatusFilter === sk);
+      btn.classList.toggle('is-active', state.ganttStatusFilter === sk);
     }
 
     if (searchInput && searchInput.value !== state.ganttSearch) {
@@ -89,9 +89,9 @@ function createGanttCardSection({
     const isOverdueProj = (p) => p.status !== 'done' && Boolean(p.projEnd) && p.projEnd < today;
     const q = state.ganttSearch.trim().toLowerCase();
     const list = nonCancelled.filter((p) => {
-      if (settings.ganttStatusFilter === 'doing' && p.status !== 'doing') return false;
-      if (settings.ganttStatusFilter === 'done' && p.status !== 'done') return false;
-      if (settings.ganttStatusFilter === 'overdue' && !isOverdueProj(p)) return false;
+      if (state.ganttStatusFilter === 'doing' && p.status !== 'doing') return false;
+      if (state.ganttStatusFilter === 'done' && p.status !== 'done') return false;
+      if (state.ganttStatusFilter === 'overdue' && !isOverdueProj(p)) return false;
       if (q) {
         const hay = `${p.name} ${p.area} ${p.tasks.map((t) => t.title).join(' ')}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -665,9 +665,9 @@ function createGanttCardSection({
 
     statusPillsWrap = el('div', 'ch-pills-row');
     for (const [sk, sl] of [['all', '全部'], ['doing', '进行中'], ['overdue', '逾期'], ['done', '已完成']]) {
-      const p = el('button', `ch-pill ${settings.ganttStatusFilter === sk ? 'is-active' : ''}`, `${sl} 0`);
+      const p = el('button', `ch-pill ${state.ganttStatusFilter === sk ? 'is-active' : ''}`, `${sl} 0`);
       p.addEventListener('click', () => {
-        updateSettings({ ganttStatusFilter: sk }, { skipModuleRefresh: true });
+        state.ganttStatusFilter = sk;
         syncToolbarControls();
         renderGanttGrid();
       });

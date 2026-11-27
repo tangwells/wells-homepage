@@ -336,6 +336,27 @@ function extractStickyMetaTags(item) {
   };
 }
 
+function collectDoingProjectLabels(projects) {
+  const labels = new Set();
+  if (!Array.isArray(projects)) return labels;
+  for (const proj of projects) {
+    if (!proj || proj.status !== 'doing') continue;
+    const name = String(proj.name || '').trim();
+    if (name) labels.add(name);
+    if (Array.isArray(proj.aliases)) {
+      for (const al of proj.aliases) {
+        const clean = String(al || '')
+          .trim()
+          .replace(/^#/, '')
+          .replace(/^(?:Project|项目)\//, '')
+          .trim();
+        if (clean) labels.add(clean);
+      }
+    }
+  }
+  return labels;
+}
+
 function stripDomainProjectTags(markdown) {
   const placeholders = [];
   const protectedStr = String(markdown || '').replace(
@@ -507,6 +528,7 @@ module.exports = {
   extractInlineTags,
   cleanTaskTitle,
   extractStickyMetaTags,
+  collectDoingProjectLabels,
   stripDomainProjectTags,
   mapStatusChar,
   parseTaskLine,

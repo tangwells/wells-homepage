@@ -968,12 +968,27 @@ function testParsersAndUtils() {
   assert.strictEqual(flags[20].inAgentDeck, true);
 
   // cleanTaskTitle rawMarkdown 校验：保留双链、粗体、业务标签，仅去重 #要事 / #闪念
-  const { cleanTaskTitle } = require('../src/parsers/markdown');
+  const { cleanTaskTitle, extractStickyMetaTags, stripDomainProjectTags } = require('../src/parsers/markdown');
   const cleanedImp = cleanTaskTitle('**08:20** #要事 推进 **重点** [[S26Q4_001|课题A]] #Project/测试 #Area/工程 #普通标签 📅 2026-11-30 ^abc123');
   assert.strictEqual(cleanedImp.rawMarkdown, '推进 **重点** [[S26Q4_001|课题A]] #Project/测试 #Area/工程 #普通标签');
   assert.strictEqual(cleanedImp.title, '推进 **重点** 课题A #普通标签');
   const cleanedIdea = cleanTaskTitle('**09:10** #闪念 使用 `code` #进度 #想法');
   assert.strictEqual(cleanedIdea.rawMarkdown, '使用 `code` #进度 #想法');
+
+  // extractStickyMetaTags 与 stripDomainProjectTags 校验
+  assert.strictEqual(
+    stripDomainProjectTags('推进 **重点** [[P1|项目1]] #Project/核心 #Area/工程 #普通标签'),
+    '推进 **重点** [[P1|项目1]] #普通标签'
+  );
+  const metaSample = extractStickyMetaTags({
+    tags: ['#Project/PMP考试', '#Area/未雨绸缪', '#普通标签'],
+    projectName: 'PMP 考试',
+    area: '未雨绸缪',
+  });
+  assert.deepStrictEqual(metaSample.areas.map((a) => a.label), ['未雨绸缪']);
+  assert.deepStrictEqual(metaSample.projects.map((p) => p.label), ['PMP考试']);
+  assert.deepStrictEqual(metaSample.filterAreas, ['未雨绸缪']);
+  assert.deepStrictEqual(metaSample.filterProjects, ['PMP考试']);
 
   // 扫描闪念与要事（不扫描代码块与 Agent Deck 内）
   const scanned = scanMarkdownTasks(sampleDaily, { filePath: '06_日志/2026-11-26.md', basename: '2026-11-26', sourceKind: 'log', implicitDate: '2026-11-26' });
@@ -1308,13 +1323,27 @@ async function testBundledPluginAndScrollPreservation() {
   assertScrollIntact('随手晾晾[换一批]');
 
   // 5.5) 原生 MarkdownRenderer 渲染、交互接管、防误触与 Component 生命周期断言
-  // A) 随手晾晾便签：要事 + 闪念应原生渲染粗体、标签、双链，且保留 #Project/核心，去掉 #要事
+  // A) 随手晾晾便签：要事 + 闪念应原生渲染粗体、普通标签、双链，#Project/核心 移到右上角，正文去掉 #要事 与领域/项目标签
   const impCard = stickySlot.querySelector('.ch-sticky-card.is-important');
   assert.ok(impCard, '应渲染要事便签');
+  const impHeadProjChip = impCard.querySelector('.ch-sticky-card-head .ch-sticky-meta-tag.is-project');
+  assert.strictEqual(impHeadProjChip?.textContent, '核心', '便签右上角应展示项目标签「核心」');
   const impBody = impCard.querySelector('.ch-sticky-card-body');
   assert.ok(impBody.querySelector('strong')?.textContent === '要事渲染', '便签应渲染粗体 <strong>');
-  assert.ok(impBody.querySelectorAll('a.tag').some((a) => a.textContent === '#Project/核心'), '便签应保留业务标签 #Project/核心');
+  assert.ok(!impBody.querySelectorAll('a.tag').some((a) => a.textContent === '#Project/核心'), '便签正文不应保留 #Project/核心');
   assert.ok(!impBody.querySelectorAll('a.tag').some((a) => a.textContent === '#要事'), '便签应去重 #要事 标签');
+  const ideaCardWithTag = stickySlot.querySelectorAll('.ch-sticky-card').find((c) => !c.classList.contains('is-important') && c.querySelector('.ch-sticky-card-body a.tag'));
+  assert.ok(ideaCardWithTag, '普通标签 #闪念标签 应仍保留在闪念正文内');
+
+  // 点击右上角项目标签进行筛选，再点「清除筛选」恢复
+  impHeadProjChip.click();
+  assertScrollIntact('随手晾晾[按项目筛选]');
+  assert.strictEqual(stickySlot.querySelectorAll('.ch-sticky-card').length, 1, '按项目「核心」筛选后应仅显示 1 张匹配卡片');
+  const resetFilterBtn = stickySlot.querySelector('.ch-sticky-filter-reset');
+  assert.ok(resetFilterBtn, '筛选激活时应显示清除筛选按钮');
+  resetFilterBtn.click();
+  assertScrollIntact('随手晾晾[清除筛选]');
+  assert.ok(stickySlot.querySelectorAll('.ch-sticky-card').length >= 3, '清除筛选后应恢复显示所有便签');
 
   // 点击便签内部双链 -> 打开链接，不触发整张便签打开文件
   const stickyLink = impBody.querySelector('a.internal-link');
@@ -1390,8 +1419,20 @@ async function testBundledPluginAndScrollPreservation() {
   const bundledCss = fs.readFileSync(path.join(PLUGIN_ROOT, 'styles.css'), 'utf8');
   assert.ok(bundledCss.includes('container-name: ch-tl-card;'), 'styles.css 应声明 ch-tl-card 容器查询');
   assert.ok(bundledCss.includes('@container ch-tl-card (max-width: 440px)'), 'styles.css 应包含日注卡片 440px 容器查询');
+  assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-tl-item'), 'styles.css 应包含窄屏日注时间轴单列布局');
+  assert.ok(bundledCss.includes('.ch-root.ch-compact .ch-tl-item'), 'styles.css 应包含紧凑屏日注时间轴单列布局');
+  assert.ok(bundledCss.includes('grid-template-columns: minmax(0, 1fr);'), 'styles.css 窄屏日注条目应使用 minmax(0, 1fr)');
+  assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-tl-time-col::before'), 'styles.css 窄屏下应隐藏时间轴竖线');
+  assert.ok(bundledCss.includes('position: static;'), 'styles.css 窄屏下时间圆点应复位为 static');
+  assert.strictEqual(bundledCss.includes('grid-template-columns: 62px minmax(0, 1fr);'), false, 'styles.css 不应保留旧的 62px 左侧时间列样式');
   assert.ok(bundledCss.includes('container-name: ch-task-card;'), 'styles.css 应声明 ch-task-card 容器查询');
   assert.ok(bundledCss.includes('@container ch-task-card (max-width: 360px)'), 'styles.css 应包含任务卡片 360px 容器查询');
+  assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-right-col'), 'styles.css 应包含窄屏展平右栏规则');
+  assert.ok(bundledCss.includes('display: contents;'), 'styles.css 应包含 display: contents 规则');
+  assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-slot-journal'), 'styles.css 应包含窄屏日注排序规则');
+  assert.ok(bundledCss.includes('order: 2;'), 'styles.css 窄屏日注应排在 order: 2');
+  assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-slot-calendar'), 'styles.css 应包含窄屏日历排序规则');
+  assert.ok(bundledCss.includes('order: 3;'), 'styles.css 窄屏日历应排在 order: 3');
 
   const execTitle = tasksSlot.querySelector('.ch-task-title');
   assert.ok(execTitle.querySelector('strong')?.textContent === '重点', '任务标题应渲染粗体');
@@ -1413,6 +1454,10 @@ async function testBundledPluginAndScrollPreservation() {
 
   // 6.2) 左栏日历周数列、月视图固定化与 Periodic Notes 周志联动
   const leftColEl = view.contentEl.querySelector('.ch-left-col');
+  assert.ok(leftColEl.querySelector('.ch-slot-clock'), '左栏应包含 .ch-slot-clock');
+  assert.ok(leftColEl.querySelector('.ch-slot-calendar'), '左栏应包含 .ch-slot-calendar');
+  assert.ok(leftColEl.querySelector('.ch-slot-bookmarks'), '左栏应包含 .ch-slot-bookmarks');
+  assert.ok(leftColEl.querySelector('.ch-slot-recent'), '左栏应包含 .ch-slot-recent');
   assert.strictEqual(leftColEl.querySelector('.ch-seg-tabs'), null, '左栏日历不得存在 月/周/日 切换标签');
   assert.strictEqual('calMode' in view.store.state, false, 'store.state 不得保留 calMode');
   const wdEls = leftColEl.querySelectorAll('.ch-cal-wd');

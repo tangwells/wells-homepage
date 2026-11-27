@@ -254,7 +254,7 @@
 
 .ch-root.ch-narrow .ch-main-grid,
 .ch-root.ch-compact .ch-main-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .ch-left-col {
@@ -264,22 +264,41 @@
   min-width: 0;
 }
 
-.ch-root.ch-narrow .ch-left-col {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.ch-root.ch-compact .ch-left-col {
-  display: flex;
-  flex-direction: column;
-}
-
 .ch-right-col {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
 }
+
+/* 窄屏模式下展平左右栏容器，按单列重排使日注位于日历上方 */
+.ch-root.ch-narrow .ch-left-col,
+.ch-root.ch-compact .ch-left-col,
+.ch-root.ch-narrow .ch-right-col,
+.ch-root.ch-compact .ch-right-col {
+  display: contents;
+}
+
+.ch-root.ch-narrow .ch-left-slot,
+.ch-root.ch-compact .ch-left-slot {
+  display: block;
+  min-width: 0;
+}
+
+.ch-root.ch-narrow .ch-slot-clock,
+.ch-root.ch-compact .ch-slot-clock { order: 1; }
+.ch-root.ch-narrow .ch-slot-journal,
+.ch-root.ch-compact .ch-slot-journal { order: 2; }
+.ch-root.ch-narrow .ch-slot-calendar,
+.ch-root.ch-compact .ch-slot-calendar { order: 3; }
+.ch-root.ch-narrow .ch-slot-bookmarks,
+.ch-root.ch-compact .ch-slot-bookmarks { order: 4; }
+.ch-root.ch-narrow .ch-slot-recent,
+.ch-root.ch-compact .ch-slot-recent { order: 5; }
+.ch-root.ch-narrow .ch-slot-tasks,
+.ch-root.ch-compact .ch-slot-tasks { order: 6; }
+.ch-root.ch-narrow .ch-slot-gantt,
+.ch-root.ch-compact .ch-slot-gantt { order: 7; }
 
 /* ---- 通用玻璃卡片 ---- */
 .ch-card {

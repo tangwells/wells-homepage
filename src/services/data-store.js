@@ -60,6 +60,8 @@ class VaultDataStore {
       importants: [],
       ideaBatch: [],
       ideaPage: 0,
+      stickyAreaFilter: '',
+      stickyProjectFilter: '',
       activeStatus: emptyActiveStatus(),
       calCursorYMD: todayStr,
       selectedDate: '',

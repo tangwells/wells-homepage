@@ -26,10 +26,10 @@ function createLeftColumnSection({
   leftColSlot,
 }) {
   const leftCol = el('div', 'ch-left-col');
-  const clockSlot = el('div', 'ch-left-slot');
-  const calendarSlot = el('div', 'ch-left-slot');
-  const bookmarksSlot = el('div', 'ch-left-slot');
-  const recentSlot = el('div', 'ch-left-slot');
+  const clockSlot = el('div', 'ch-left-slot ch-slot-clock');
+  const calendarSlot = el('div', 'ch-left-slot ch-slot-calendar');
+  const bookmarksSlot = el('div', 'ch-left-slot ch-slot-bookmarks');
+  const recentSlot = el('div', 'ch-left-slot ch-slot-recent');
   leftCol.appendChild(clockSlot);
   leftCol.appendChild(calendarSlot);
   leftCol.appendChild(bookmarksSlot);

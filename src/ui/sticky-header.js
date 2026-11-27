@@ -7,6 +7,7 @@ const {
   isInteractiveMarkdownTarget,
   createMarkdownRenderScope,
 } = require('../utils/markdown-render');
+const { extractStickyMetaTags, stripDomainProjectTags } = require('../parsers/markdown');
 const { ensureNoteFromTemplate, openFileAtLine, runQuickAddChoice, runObsidianCommand } = require('../services/vault-adapter');
 
 function createStickyHeaderSection({
@@ -86,12 +87,53 @@ function createStickyHeaderSection({
 
       const stickyZone = el('div', 'ch-sticky-zone');
       const pinnedImportants = state.importants || [];
+      const areaFilter = state.stickyAreaFilter || '';
+      const projectFilter = state.stickyProjectFilter || '';
+      const isFiltered = Boolean(areaFilter || projectFilter);
+
+      const metaCache = new Map();
+      const getMeta = (item) => {
+        if (metaCache.has(item)) return metaCache.get(item);
+        const meta = extractStickyMetaTags(item);
+        metaCache.set(item, meta);
+        return meta;
+      };
+
+      const areaCounts = new Map();
+      const projectCounts = new Map();
+      const allStickyItems = [...pinnedImportants, ...(state.ideas || [])];
+      for (const item of allStickyItems) {
+        const meta = getMeta(item);
+        for (const areaName of new Set(meta.filterAreas)) {
+          areaCounts.set(areaName, (areaCounts.get(areaName) || 0) + 1);
+        }
+        for (const projName of new Set(meta.filterProjects)) {
+          projectCounts.set(projName, (projectCounts.get(projName) || 0) + 1);
+        }
+      }
+      if (areaFilter && !areaCounts.has(areaFilter)) areaCounts.set(areaFilter, 0);
+      if (projectFilter && !projectCounts.has(projectFilter)) projectCounts.set(projectFilter, 0);
+
+      const matchesFilter = (item) => {
+        const meta = getMeta(item);
+        if (areaFilter && !meta.filterAreas.includes(areaFilter)) return false;
+        if (projectFilter && !meta.filterProjects.includes(projectFilter)) return false;
+        return true;
+      };
+
+      const filteredImportants = isFiltered ? pinnedImportants.filter(matchesFilter) : pinnedImportants;
+      const filteredIdeas = isFiltered ? state.ideaBatch.filter(matchesFilter) : state.ideaBatch;
 
       if (settings.stickyFolded) {
+        const filterParts = [];
+        if (areaFilter) filterParts.push(`领域:${areaFilter}`);
+        if (projectFilter) filterParts.push(`项目:${projectFilter}`);
+        const baseSummary =
+          filteredImportants.length > 0
+            ? `» 随手晾晾 (要事 ${filteredImportants.length} · 闪念 ${filteredIdeas.length})`
+            : `» 随手晾晾 (${filteredIdeas.length})`;
         const summaryText =
-          pinnedImportants.length > 0
-            ? `» 随手晾晾 (要事 ${pinnedImportants.length} · 闪念 ${state.ideaBatch.length})`
-            : `» 随手晾晾 (${state.ideaBatch.length})`;
+          filterParts.length > 0 ? `${baseSummary} · ${filterParts.join(' / ')}` : baseSummary;
         const unfoldBtn = el('button', 'ch-folded-rope-btn', summaryText);
         unfoldBtn.addEventListener('click', () => {
           updateSettings({ stickyFolded: false });
@@ -129,11 +171,11 @@ function createStickyHeaderSection({
             : rootEl && rootEl.classList.contains('ch-medium')
             ? 3
             : 6;
-        const ideaSlots = Math.max(0, totalSlots - pinnedImportants.length);
-        const ideaSlice = ideaSlots > 0 ? state.ideaBatch.slice(0, ideaSlots) : [];
+        const ideaSlots = Math.max(0, totalSlots - filteredImportants.length);
+        const ideaSlice = ideaSlots > 0 ? filteredIdeas.slice(0, ideaSlots) : [];
 
         const renderStickyCardBody = (bodyEl, item) => {
-          const stickyMd = String(item.rawMarkdown || item.title || '')
+          const stickyMd = stripDomainProjectTags(String(item.rawMarkdown || item.title || ''))
             .replace(/<br\s*\/?>/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
@@ -146,22 +188,69 @@ function createStickyHeaderSection({
           });
         };
 
+        const appendMetaTagChips = (container, meta) => {
+          for (const a of meta.areas) {
+            const btn = el(
+              'button',
+              `ch-sticky-meta-tag is-area${areaFilter === a.label ? ' is-active' : ''}`,
+              a.label
+            );
+            btn.type = 'button';
+            btn.title = `领域 ${a.raw} · 点击按此领域筛选`;
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              state.stickyAreaFilter = state.stickyAreaFilter === a.label ? '' : a.label;
+              updateSticky();
+            });
+            container.appendChild(btn);
+          }
+          for (const p of meta.projects) {
+            const btn = el(
+              'button',
+              `ch-sticky-meta-tag is-project${projectFilter === p.label ? ' is-active' : ''}`,
+              p.label
+            );
+            btn.type = 'button';
+            btn.title = `项目 ${p.raw} · 点击按此项目筛选`;
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              state.stickyProjectFilter = state.stickyProjectFilter === p.label ? '' : p.label;
+              updateSticky();
+            });
+            container.appendChild(btn);
+          }
+        };
+
         const cardsGrid = el('div', 'ch-sticky-cards');
-        if (pinnedImportants.length === 0 && ideaSlice.length === 0) {
+        if (filteredImportants.length === 0 && ideaSlice.length === 0) {
           const emptyCard = el('div', 'ch-sticky-card');
           emptyCard.appendChild(el('div', 'ch-clothespin'));
-          emptyCard.appendChild(el('div', 'ch-sticky-card-head', '闪念漫步'));
-          emptyCard.appendChild(el('div', 'ch-sticky-card-body', '暂无历史 [I] 闪念或 #要事，点下方「+ 贴一张」开始记录。'));
-          emptyCard.addEventListener('click', modals.openFlashCaptureModal);
+          if (isFiltered) {
+            emptyCard.appendChild(el('div', 'ch-sticky-card-head', '筛选结果'));
+            emptyCard.appendChild(
+              el('div', 'ch-sticky-card-body', '当前领域 / 项目筛选下暂无匹配的闪念或要事，点击清除筛选查看全部。')
+            );
+            emptyCard.addEventListener('click', () => {
+              state.stickyAreaFilter = '';
+              state.stickyProjectFilter = '';
+              updateSticky();
+            });
+          } else {
+            emptyCard.appendChild(el('div', 'ch-sticky-card-head', '闪念漫步'));
+            emptyCard.appendChild(el('div', 'ch-sticky-card-body', '暂无历史 [I] 闪念或 #要事，点下方「+ 贴一张」开始记录。'));
+            emptyCard.addEventListener('click', modals.openFlashCaptureModal);
+          }
           cardsGrid.appendChild(emptyCard);
         } else {
-          for (const imp of pinnedImportants) {
+          for (const imp of filteredImportants) {
+            const meta = getMeta(imp);
             const card = el('div', 'ch-sticky-card is-important');
             card.appendChild(el('div', 'ch-clothespin'));
             const head = el('div', 'ch-sticky-card-head');
-            head.appendChild(el('span', '', extractLabelFromPath(imp.filePath)));
+            head.appendChild(el('span', 'ch-sticky-card-date', extractLabelFromPath(imp.filePath)));
 
             const headRight = el('div', 'ch-sticky-head-right');
+            appendMetaTagChips(headRight, meta);
             headRight.appendChild(el('span', 'ch-sticky-kind-tag is-important', imp.timestamp ? `要事 · ${imp.timestamp}` : '要事'));
             const doneBtn = el('button', 'ch-sticky-done-btn', '✓');
             doneBtn.title = '完成要事（改为 [x] 并下架）';
@@ -185,12 +274,26 @@ function createStickyHeaderSection({
           }
 
           for (const idea of ideaSlice) {
+            const meta = getMeta(idea);
+            const hasMetaTags = meta.areas.length > 0 || meta.projects.length > 0;
             const card = el('div', 'ch-sticky-card');
             card.appendChild(el('div', 'ch-clothespin'));
             const head = el('div', 'ch-sticky-card-head');
-            head.appendChild(el('span', '', extractLabelFromPath(idea.filePath)));
-            head.appendChild(el('span', '', idea.timestamp || '闪念'));
+            const dateText =
+              hasMetaTags && idea.timestamp
+                ? `${extractLabelFromPath(idea.filePath)} · ${idea.timestamp}`
+                : extractLabelFromPath(idea.filePath);
+            head.appendChild(el('span', 'ch-sticky-card-date', dateText));
+
+            const headRight = el('div', 'ch-sticky-head-right');
+            if (hasMetaTags) {
+              appendMetaTagChips(headRight, meta);
+            } else {
+              headRight.appendChild(el('span', 'ch-sticky-kind-tag', idea.timestamp || '闪念'));
+            }
+            head.appendChild(headRight);
             card.appendChild(head);
+
             const body = el('div', 'ch-sticky-card-body');
             renderStickyCardBody(body, idea);
             card.appendChild(body);
@@ -206,9 +309,7 @@ function createStickyHeaderSection({
         stickyZone.appendChild(ropeWrap);
 
         const ctrlRow = el('div', 'ch-sticky-controls');
-        const leftCtrl = el('div', '');
-        leftCtrl.style.display = 'flex';
-        leftCtrl.style.gap = '4px';
+        const leftCtrl = el('div', 'ch-sticky-controls-left');
         const addBtn = el('button', 'ch-text-btn', '+ 贴一张');
         addBtn.addEventListener('click', modals.openFlashCaptureModal);
         const randBtn = el('button', 'ch-text-btn', '换一批');
@@ -219,7 +320,65 @@ function createStickyHeaderSection({
         leftCtrl.appendChild(addBtn);
         leftCtrl.appendChild(randBtn);
 
+        const filterCtrl = el('div', 'ch-sticky-controls-filters');
+        const sortEntries = (map) =>
+          Array.from(map.entries()).sort(
+            (a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hans-CN')
+          );
+        const areaEntries = sortEntries(areaCounts);
+        const projectEntries = sortEntries(projectCounts);
+
+        const areaSelect = el('select', `ch-sticky-filter-select${areaFilter ? ' is-active' : ''}`);
+        areaSelect.setAttribute('data-filter', 'area');
+        areaSelect.title = '按领域筛选';
+        const areaAllOpt = el('option', '', '全部领域');
+        areaAllOpt.value = '';
+        areaSelect.appendChild(areaAllOpt);
+        for (const [name, cnt] of areaEntries) {
+          const opt = el('option', '', `${name} (${cnt})`);
+          opt.value = name;
+          areaSelect.appendChild(opt);
+        }
+        areaSelect.value = areaFilter;
+        areaSelect.addEventListener('change', () => {
+          state.stickyAreaFilter = areaSelect.value;
+          updateSticky();
+        });
+        filterCtrl.appendChild(areaSelect);
+
+        const projectSelect = el('select', `ch-sticky-filter-select${projectFilter ? ' is-active' : ''}`);
+        projectSelect.setAttribute('data-filter', 'project');
+        projectSelect.title = '按项目筛选';
+        const projAllOpt = el('option', '', '全部项目');
+        projAllOpt.value = '';
+        projectSelect.appendChild(projAllOpt);
+        for (const [name, cnt] of projectEntries) {
+          const opt = el('option', '', `${name} (${cnt})`);
+          opt.value = name;
+          projectSelect.appendChild(opt);
+        }
+        projectSelect.value = projectFilter;
+        projectSelect.addEventListener('change', () => {
+          state.stickyProjectFilter = projectSelect.value;
+          updateSticky();
+        });
+        filterCtrl.appendChild(projectSelect);
+
+        if (isFiltered) {
+          filterCtrl.appendChild(
+            el('span', 'ch-sticky-filter-count', `共 ${filteredImportants.length + filteredIdeas.length} 条`)
+          );
+          const resetBtn = el('button', 'ch-text-btn ch-sticky-filter-reset', '清除筛选');
+          resetBtn.addEventListener('click', () => {
+            state.stickyAreaFilter = '';
+            state.stickyProjectFilter = '';
+            updateSticky();
+          });
+          filterCtrl.appendChild(resetBtn);
+        }
+
         ctrlRow.appendChild(leftCtrl);
+        ctrlRow.appendChild(filterCtrl);
         stickyZone.appendChild(ctrlRow);
       }
       stickySlot.appendChild(stickyZone);

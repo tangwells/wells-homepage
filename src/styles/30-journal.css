@@ -94,11 +94,6 @@
   align-items: stretch;
 }
 
-.ch-root.ch-compact .ch-tl-item {
-  grid-template-columns: 62px minmax(0, 1fr);
-  gap: 8px;
-}
-
 .ch-tl-time-col {
   position: relative;
   display: flex;
@@ -185,6 +180,48 @@
 
 .ch-tl-card.has-children {
   cursor: pointer;
+}
+
+/* 窄屏模式下将时间戳移至日注卡片上方，避免左侧时间列挤占阅读宽度 */
+.ch-root.ch-narrow .ch-tl-item,
+.ch-root.ch-compact .ch-tl-item {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.ch-root.ch-narrow .ch-tl-time-col,
+.ch-root.ch-compact .ch-tl-time-col {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 0;
+}
+
+.ch-root.ch-narrow .ch-tl-time-col::before,
+.ch-root.ch-compact .ch-tl-time-col::before {
+  display: none;
+}
+
+.ch-root.ch-narrow .ch-tl-dot,
+.ch-root.ch-compact .ch-tl-dot {
+  position: static;
+  flex-shrink: 0;
+}
+
+.ch-root.ch-narrow .ch-tl-time-btn,
+.ch-root.ch-compact .ch-tl-time-btn {
+  text-align: left;
+  padding: 1px 4px;
+}
+
+.ch-root.ch-narrow .ch-tl-card,
+.ch-root.ch-compact .ch-tl-card {
+  margin-bottom: 10px;
+}
+
+.ch-root.ch-narrow .ch-tl-item:last-child .ch-tl-card,
+.ch-root.ch-compact .ch-tl-item:last-child .ch-tl-card {
+  margin-bottom: 2px;
 }
 
 .ch-tl-head-row {

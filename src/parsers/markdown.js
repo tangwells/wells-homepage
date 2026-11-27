@@ -290,6 +290,71 @@ function cleanTaskTitle(rawRest) {
   return { title: plainTitle, rawMarkdown, tokens, timestamp };
 }
 
+function extractStickyMetaTags(item) {
+  const tags = Array.isArray(item?.tags) ? item.tags : [];
+  const areas = [];
+  const projects = [];
+  const seenAreas = new Set();
+  const seenProjects = new Set();
+
+  for (const tag of tags) {
+    const t = String(tag || '').trim();
+    const am = t.match(/^#(?:Area|领域)\/(.+)$/);
+    if (am) {
+      const label = am[1];
+      if (label && !seenAreas.has(label)) {
+        seenAreas.add(label);
+        areas.push({ label, raw: t });
+      }
+      continue;
+    }
+    const pm = t.match(/^#(?:Project|项目)\/(.+)$/);
+    if (pm) {
+      const label = pm[1];
+      if (label && !seenProjects.has(label)) {
+        seenProjects.add(label);
+        projects.push({ label, raw: t });
+      }
+    }
+  }
+
+  const filterAreas = areas.map((a) => a.label);
+  if (item?.area && !seenAreas.has(item.area)) {
+    filterAreas.push(item.area);
+  }
+
+  const filterProjects = projects.map((p) => p.label);
+  if (filterProjects.length === 0 && item?.projectName) {
+    filterProjects.push(item.projectName);
+  }
+
+  return {
+    areas,
+    projects,
+    filterAreas,
+    filterProjects,
+  };
+}
+
+function stripDomainProjectTags(markdown) {
+  const placeholders = [];
+  const protectedStr = String(markdown || '').replace(
+    /\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s<>\])"']+/g,
+    (match) => {
+      placeholders.push(match);
+      return `__CH_STAG_${placeholders.length - 1}__`;
+    }
+  );
+  const stripped = protectedStr.replace(
+    /(?:^|\s)#(?:Area|领域|Project|项目)\/[^\s#.,;:!?()[\]{}<>"']+/g,
+    ' '
+  );
+  return stripped
+    .replace(/__CH_STAG_(\d+)__/g, (_m, idx) => placeholders[Number(idx)])
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 function mapStatusChar(ch) {
   if (ch === ' ') return 'todo';
   if (ch === '/') return 'doing';
@@ -441,6 +506,8 @@ module.exports = {
   tokenizeRichLine,
   extractInlineTags,
   cleanTaskTitle,
+  extractStickyMetaTags,
+  stripDomainProjectTags,
   mapStatusChar,
   parseTaskLine,
   resolveTaskProjectAndArea,

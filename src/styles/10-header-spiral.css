@@ -142,10 +142,10 @@
   color: #fff;
 }
 
-/* ---- 螺旋日志与工作台两栏头部（与下方主体双栏列宽严格对齐） ---- */
+/* ---- 顶部两栏头部（左：工作台标题与搜索；右：螺旋日程） ---- */
 .ch-header {
   display: grid;
-  grid-template-columns: minmax(225px, 21%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
 }
@@ -155,7 +155,7 @@
 }
 
 .ch-root.ch-medium .ch-header {
-  grid-template-columns: minmax(225px, 21%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
 }
 
@@ -269,7 +269,7 @@
   color: var(--ch-accent-strong);
 }
 
-/* ---- 右栏顶部：标题 + 搜索 + 快捷图标（在日注正中上方水平居中） ---- */
+/* ---- 左栏顶部：标题 + 搜索 + 快捷图标 ---- */
 .ch-hero-center {
   display: flex;
   flex-direction: column;
@@ -443,7 +443,7 @@
   height: 16px;
 }
 
-/* ---- 左栏顶部：嵌入 Nautilus Spiral 螺旋日程图（在晚上好正中上方水平居中） ---- */
+/* ---- 右栏顶部：嵌入 Nautilus Spiral 螺旋日程图 ---- */
 .ch-focus-zone {
   display: flex;
   justify-content: center;
@@ -476,6 +476,18 @@
 
 .ch-root.ch-narrow .ch-spiral-shell {
   width: 220px;
+}
+
+.ch-spiral-shell:has(.naut-svg.has-labels) {
+  width: 440px;
+}
+
+.ch-root.ch-medium .ch-spiral-shell:has(.naut-svg.has-labels) {
+  width: 340px;
+}
+
+.ch-root.ch-narrow .ch-spiral-shell:has(.naut-svg.has-labels) {
+  width: 440px;
 }
 
 .ch-spiral-toolbar {
@@ -585,8 +597,8 @@
   z-index: 40;
   width: 260px;
   max-width: calc(100vw - 32px);
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
 }
 
 .ch-spiral-shell .naut-svg {
@@ -596,6 +608,10 @@
   display: block;
   margin: 0 auto;
   overflow: visible;
+}
+
+.ch-spiral-shell .naut-svg.has-labels {
+  max-width: 428px;
 }
 
 .ch-spiral-shell .naut-hour {

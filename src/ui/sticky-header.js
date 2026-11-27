@@ -28,8 +28,8 @@ function createStickyHeaderSection({
   const focusZoneSlot = el('div', 'ch-focus-slot');
   const heroSlot = el('div', 'ch-hero-slot');
   const headerEl = el('div', 'ch-header');
-  headerEl.appendChild(focusZoneSlot);
   headerEl.appendChild(heroSlot);
+  headerEl.appendChild(focusZoneSlot);
   headerSlot.appendChild(headerEl);
 
   function computeSearchResults(query) {

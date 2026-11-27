@@ -376,6 +376,36 @@ function stripDomainProjectTags(markdown) {
     .trim();
 }
 
+function extractAndStripInlineTags(markdown) {
+  const placeholders = [];
+  const protectedStr = String(markdown || '').replace(
+    /`[^`]*`|\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s<>\])"']+/g,
+    (match) => {
+      placeholders.push(match);
+      return `__CH_ITAG_${placeholders.length - 1}__`;
+    }
+  );
+  const tags = [];
+  const seen = new Set();
+  const stripped = protectedStr.replace(
+    /(^|[\s>])(#[^\s#.,;:!?()[\]{}<>"']+)/g,
+    (full, prefix, tag) => {
+      if (/^#\d+$/.test(tag)) return full;
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        tags.push(tag);
+      }
+      return prefix === '>' ? '>' : prefix;
+    }
+  );
+  const restored = stripped
+    .replace(/__CH_ITAG_(\d+)__/g, (_m, idx) => placeholders[Number(idx)])
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]*(<br\s*\/?>)[ \t]*/gi, '$1')
+    .trim();
+  return { text: restored, tags };
+}
+
 function mapStatusChar(ch) {
   if (ch === ' ') return 'todo';
   if (ch === '/') return 'doing';
@@ -530,6 +560,7 @@ module.exports = {
   extractStickyMetaTags,
   collectDoingProjectLabels,
   stripDomainProjectTags,
+  extractAndStripInlineTags,
   mapStatusChar,
   parseTaskLine,
   resolveTaskProjectAndArea,

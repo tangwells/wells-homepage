@@ -8,6 +8,7 @@ const {
   endOfNonEmptyBody,
   normalizeTrailingNewline,
   tokenizeRichLine,
+  extractAndStripInlineTags,
 } = require('./markdown');
 
 const DAY_PERIOD_TITLE_RE = /^##\s+(清晨|上午|下午|晚上)\s*$/;
@@ -281,7 +282,6 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       kind = statusChar === ' ' ? 'todo' : statusChar === '/' ? 'doing' : 'done';
     } else if (statusChar === 'I') {
       kind = 'idea';
-      badge = '闪念';
       body = body.replace(/(?:^|\s)#闪念(?=\s|$)/g, ' ').trim();
     } else if (statusChar === 'i') {
       if (/(?:^|\s)#要事(?=\s|$)/.test(body)) {
@@ -291,6 +291,7 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       } else if (/(?:^|\s)#进度(?=\s|$)/.test(body)) {
         kind = 'progress';
         badge = '进度';
+        body = body.replace(/(?:^|\s)#进度(?=\s|$)/g, ' ').trim();
       } else {
         kind = 'info';
         badge = '记录';
@@ -361,6 +362,9 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       .trim();
   }
 
+  const { text: cleanBody, tags } = extractAndStripInlineTags(body);
+  body = cleanBody;
+
   return {
     key: `${filePath}:${lineNumber}:${String(rawLine || '').slice(0, 40)}`,
     filePath,
@@ -374,6 +378,7 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
     timeLabel,
     subTimeLabel,
     dateChips,
+    tags,
     bodyText: body,
     tokens: tokenizeRichLine(body),
   };
@@ -525,7 +530,7 @@ function parseDailyJournalTimeline(content, filePath) {
 
     flushEntry();
     const header = parseJournalEntryHeader(line, i, filePath);
-    if (header.bodyText || header.badge) {
+    if (header.bodyText || header.badge || header.kind === 'idea' || (header.tags && header.tags.length > 0)) {
       currentEntry = { ...header, children: [], childrenMeta: null };
     }
   }

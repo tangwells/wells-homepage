@@ -73,8 +73,7 @@ class VaultDataStore {
       bookmarkCollapsed: new Set(),
       projects: [],
       execTasks: [],
-      execQuickScope: 'focus', // focus | today | overdue | open | done
-      execActorFilter: 'all', // all | human | ai
+      execQuickScope: 'today', // today | overdue | open | done
       execKeyword: '',
       execExpandState: new Map(),
       journalDate: todayStr,

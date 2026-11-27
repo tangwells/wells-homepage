@@ -556,6 +556,7 @@ const {
   endOfNonEmptyBody,
   normalizeTrailingNewline,
   tokenizeRichLine,
+  extractAndStripInlineTags,
 } = require('./markdown');
 
 const DAY_PERIOD_TITLE_RE = /^##\s+(清晨|上午|下午|晚上)\s*$/;
@@ -829,7 +830,6 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       kind = statusChar === ' ' ? 'todo' : statusChar === '/' ? 'doing' : 'done';
     } else if (statusChar === 'I') {
       kind = 'idea';
-      badge = '闪念';
       body = body.replace(/(?:^|\s)#闪念(?=\s|$)/g, ' ').trim();
     } else if (statusChar === 'i') {
       if (/(?:^|\s)#要事(?=\s|$)/.test(body)) {
@@ -839,6 +839,7 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       } else if (/(?:^|\s)#进度(?=\s|$)/.test(body)) {
         kind = 'progress';
         badge = '进度';
+        body = body.replace(/(?:^|\s)#进度(?=\s|$)/g, ' ').trim();
       } else {
         kind = 'info';
         badge = '记录';
@@ -909,6 +910,9 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
       .trim();
   }
 
+  const { text: cleanBody, tags } = extractAndStripInlineTags(body);
+  body = cleanBody;
+
   return {
     key: `${filePath}:${lineNumber}:${String(rawLine || '').slice(0, 40)}`,
     filePath,
@@ -922,6 +926,7 @@ function parseJournalEntryHeader(rawLine, lineNumber, filePath) {
     timeLabel,
     subTimeLabel,
     dateChips,
+    tags,
     bodyText: body,
     tokens: tokenizeRichLine(body),
   };
@@ -1073,7 +1078,7 @@ function parseDailyJournalTimeline(content, filePath) {
 
     flushEntry();
     const header = parseJournalEntryHeader(line, i, filePath);
-    if (header.bodyText || header.badge) {
+    if (header.bodyText || header.badge || header.kind === 'idea' || (header.tags && header.tags.length > 0)) {
       currentEntry = { ...header, children: [], childrenMeta: null };
     }
   }
@@ -1487,6 +1492,36 @@ function stripDomainProjectTags(markdown) {
     .trim();
 }
 
+function extractAndStripInlineTags(markdown) {
+  const placeholders = [];
+  const protectedStr = String(markdown || '').replace(
+    /`[^`]*`|\[\[[^\]]*\]\]|\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s<>\])"']+/g,
+    (match) => {
+      placeholders.push(match);
+      return `__CH_ITAG_${placeholders.length - 1}__`;
+    }
+  );
+  const tags = [];
+  const seen = new Set();
+  const stripped = protectedStr.replace(
+    /(^|[\s>])(#[^\s#.,;:!?()[\]{}<>"']+)/g,
+    (full, prefix, tag) => {
+      if (/^#\d+$/.test(tag)) return full;
+      if (!seen.has(tag)) {
+        seen.add(tag);
+        tags.push(tag);
+      }
+      return prefix === '>' ? '>' : prefix;
+    }
+  );
+  const restored = stripped
+    .replace(/__CH_ITAG_(\d+)__/g, (_m, idx) => placeholders[Number(idx)])
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]*(<br\s*\/?>)[ \t]*/gi, '$1')
+    .trim();
+  return { text: restored, tags };
+}
+
 function mapStatusChar(ch) {
   if (ch === ' ') return 'todo';
   if (ch === '/') return 'doing';
@@ -1641,6 +1676,7 @@ module.exports = {
   extractStickyMetaTags,
   collectDoingProjectLabels,
   stripDomainProjectTags,
+  extractAndStripInlineTags,
   mapStatusChar,
   parseTaskLine,
   resolveTaskProjectAndArea,
@@ -2584,8 +2620,7 @@ class VaultDataStore {
       bookmarkCollapsed: new Set(),
       projects: [],
       execTasks: [],
-      execQuickScope: 'focus', // focus | today | overdue | open | done
-      execActorFilter: 'all', // all | human | ai
+      execQuickScope: 'today', // today | overdue | open | done
       execKeyword: '',
       execExpandState: new Map(),
       journalDate: todayStr,
@@ -4809,6 +4844,21 @@ const { createMarkdownRenderScope } = require('../utils/markdown-render');
 const { ensureNoteFromTemplate, openFileAtLine } = require('../services/vault-adapter');
 const { renderExpandableChildren } = require('./expandable');
 
+const JOURNAL_DOT_LEGEND = [
+  { kind: 'log', label: '日常/完成' },
+  { kind: 'idea', label: '闪念' },
+  { kind: 'important', label: '要事/疑难' },
+  { kind: 'agent', label: '执行/AI' },
+];
+
+function getTimelineDotTitle(kind) {
+  if (kind === 'idea') return '闪念';
+  if (kind === 'important') return '要事';
+  if (kind === 'question') return '疑难';
+  if (kind === 'agent' || kind === 'review') return '执行/AI';
+  return '日常/完成';
+}
+
 function createJournalCardSection({
   app,
   store,
@@ -4909,6 +4959,7 @@ function createJournalCardSection({
 
         const timeCol = el('div', 'ch-tl-time-col');
         const dot = el('span', `ch-tl-dot kind-${entry.kind}`);
+        dot.title = getTimelineDotTitle(entry.kind);
         timeCol.appendChild(dot);
 
         const timeBtn = el('button', 'ch-tl-time-btn', entry.timeLabel);
@@ -4981,6 +5032,24 @@ function createJournalCardSection({
           indentPlainChildren: true,
         });
 
+        if (entry.tags && entry.tags.length > 0) {
+          const tagsEl = el('div', 'ch-tl-tags');
+          for (const tag of entry.tags) {
+            const tagLink = el('a', 'tag ch-tl-tag', tag);
+            tagLink.setAttribute('href', tag);
+            tagLink.title = `搜索标签 ${tag}`;
+            tagLink.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              app?.internalPlugins?.plugins?.['global-search']?.instance?.openGlobalSearch?.(
+                `tag:${tag}`
+              );
+            });
+            tagsEl.appendChild(tagLink);
+          }
+          tlCard.appendChild(tagsEl);
+        }
+
         itemEl.appendChild(tlCard);
         return itemEl;
       }
@@ -5037,8 +5106,18 @@ function createJournalCardSection({
             panel.appendChild(emptyWrap);
           } else {
             const pHead = el('div', 'ch-tl-period-head');
-            pHead.appendChild(el('span', '', `## ${state.journalPeriod}`));
-            pHead.appendChild(el('span', '', `${entries.length} 条 · 点击打开标题行`));
+            const pLeft = el('div', 'ch-tl-period-left');
+            pLeft.appendChild(el('span', 'ch-tl-period-title', `## ${state.journalPeriod}`));
+            const legend = el('span', 'ch-tl-legend');
+            for (const item of JOURNAL_DOT_LEGEND) {
+              const li = el('span', 'ch-tl-legend-item');
+              li.appendChild(el('span', `ch-tl-legend-dot kind-${item.kind}`));
+              li.appendChild(document.createTextNode(item.label));
+              legend.appendChild(li);
+            }
+            pLeft.appendChild(legend);
+            pHead.appendChild(pLeft);
+            pHead.appendChild(el('span', 'ch-tl-period-meta', `${entries.length} 条 · 点击打开标题行`));
             pHead.addEventListener('click', () => {
               const ln = journal.periodLineNumbers[state.journalPeriod];
               openFileAtLine(app, journal.filePath, ln >= 0 ? ln : undefined);
@@ -7108,7 +7187,6 @@ function createTasksCardSection({
   let bodyContainer = null;
   let densButtons = new Map();
   let layButtons = new Map();
-  let actorButtons = new Map();
   let doneCheckbox = null;
   let kwInput = null;
 
@@ -7224,9 +7302,6 @@ function createTasksCardSection({
     for (const [k, btn] of layButtons.entries()) {
       btn.classList.toggle('is-active', settings.taskLayout === k);
     }
-    for (const [k, btn] of actorButtons.entries()) {
-      btn.classList.toggle('is-active', state.execActorFilter === k);
-    }
     if (doneCheckbox) {
       doneCheckbox.checked = Boolean(settings.showCompletedTasks);
     }
@@ -7243,8 +7318,6 @@ function createTasksCardSection({
 
     function matchesBaseFilters(t) {
       if (t.bucket === 'cancelled') return false;
-      if (state.execActorFilter === 'human' && t.hasRobot) return false;
-      if (state.execActorFilter === 'ai' && !t.hasRobot) return false;
       if (state.selectedDate && t.date !== state.selectedDate) return false;
       const kw = state.execKeyword.trim().toLowerCase();
       if (kw) {
@@ -7254,10 +7327,6 @@ function createTasksCardSection({
       return true;
     }
 
-    const isFocusMatch = (t) =>
-      t.date === today
-        ? settings.showCompletedTasks || t.bucket !== 'done'
-        : t.date < today && (t.bucket === 'todo' || t.bucket === 'doing');
     const isTodayMatch = (t) =>
       t.date === today && (settings.showCompletedTasks || t.bucket !== 'done');
     const isOverdueMatch = (t) =>
@@ -7269,7 +7338,6 @@ function createTasksCardSection({
       const baseList = state.execTasks.filter(matchesBaseFilters);
 
       const counts = {
-        focus: baseList.filter(isFocusMatch).length,
         today: baseList.filter(isTodayMatch).length,
         overdue: baseList.filter(isOverdueMatch).length,
         open: baseList.filter(isOpenMatch).length,
@@ -7278,8 +7346,7 @@ function createTasksCardSection({
 
       pillsContainer.replaceChildren();
       const scopes = [
-        ['focus', '默认聚焦'],
-        ['today', '仅今日'],
+        ['today', '今日'],
         ['overdue', '历史延期'],
         ['open', '全部待办'],
         ['done', '已完成'],
@@ -7304,16 +7371,14 @@ function createTasksCardSection({
       let scoped = [];
       if (state.selectedDate) {
         scoped = baseList.filter((t) => settings.showCompletedTasks || state.execQuickScope === 'done' || t.bucket !== 'done');
-      } else if (state.execQuickScope === 'focus') {
-        scoped = baseList.filter(isFocusMatch);
-      } else if (state.execQuickScope === 'today') {
-        scoped = baseList.filter(isTodayMatch);
       } else if (state.execQuickScope === 'overdue') {
         scoped = baseList.filter(isOverdueMatch);
       } else if (state.execQuickScope === 'open') {
         scoped = baseList.filter(isOpenMatch);
       } else if (state.execQuickScope === 'done') {
         scoped = baseList.filter(isDoneMatch);
+      } else {
+        scoped = baseList.filter(isTodayMatch);
       }
 
       activeCountBadge.textContent = `${scoped.length} 项`;
@@ -7422,7 +7487,6 @@ function createTasksCardSection({
     tasksSlot.replaceChildren();
     densButtons = new Map();
     layButtons = new Map();
-    actorButtons = new Map();
 
     const card = el('div', 'ch-card');
 
@@ -7495,20 +7559,7 @@ function createTasksCardSection({
       renderTaskBody();
     });
 
-    const actorSeg = el('div', 'ch-seg-tabs');
-    for (const [ak, al] of [['all', '全部'], ['human', '仅人工'], ['ai', '仅 🤖 AI']]) {
-      const b = el('button', `ch-seg-tab ${state.execActorFilter === ak ? 'is-active' : ''}`, al);
-      b.addEventListener('click', () => {
-        state.execActorFilter = ak;
-        syncToolbarControls();
-        renderTaskBody();
-      });
-      actorButtons.set(ak, b);
-      actorSeg.appendChild(b);
-    }
-
     fg.appendChild(kwInput);
-    fg.appendChild(actorSeg);
     filterRow.appendChild(fg);
     card.appendChild(filterRow);
 

@@ -982,7 +982,16 @@ function testParsersAndUtils() {
   const cleanedIdea = cleanTaskTitle('**09:10** #闪念 使用 `code` #进度 #想法');
   assert.strictEqual(cleanedIdea.rawMarkdown, '使用 `code` #进度 #想法');
 
-  // extractStickyMetaTags 与 stripDomainProjectTags 校验
+  // extractStickyMetaTags、stripDomainProjectTags 与 extractAndStripInlineTags 校验
+  const { extractAndStripInlineTags } = require('../src/parsers/markdown');
+  const extracted = extractAndStripInlineTags(
+    '完成 #工作流 与 `#代码标签` [[笔记#标题]] https://example.com#sec #123 #Project/核心<br>下一行 #复盘'
+  );
+  assert.deepStrictEqual(extracted.tags, ['#工作流', '#Project/核心', '#复盘']);
+  assert.strictEqual(
+    extracted.text,
+    '完成 与 `#代码标签` [[笔记#标题]] https://example.com#sec #123<br>下一行'
+  );
   assert.strictEqual(
     stripDomainProjectTags('推进 **重点** [[P1|项目1]] #Project/核心 #Area/工程 #普通标签'),
     '推进 **重点** [[P1|项目1]] #普通标签'
@@ -1014,10 +1023,15 @@ function testParsersAndUtils() {
   assert.ok(inserted.includes('- [I] **14:20** 下午灵感<br>第二行'));
   assert.strictEqual(buildImportantEntryLine('#要事 处理问题', '09:05'), '- [i] **09:05** #要事 处理问题');
 
-  // 日注时间轴（仅识别粗体时间戳）
+  // 日注时间轴（仅识别粗体时间戳，闪念不再生成冗余 badge，标签提取到 tags）
   const tl = parseDailyJournalTimeline(sampleDaily, '06_日志/2026-11-26.md');
   assert.strictEqual(tl.periods['清晨'].length, 3);
   assert.strictEqual(tl.periods['清晨'][0].timeLabel, '08:00');
+  assert.strictEqual(tl.periods['清晨'][1].kind, 'idea');
+  assert.strictEqual(tl.periods['清晨'][1].badge, '', '闪念条目不应在文本块内生成冗余 badge');
+  const tlTagged = parseDailyJournalTimeline('## 清晨\n- **08:30** 整理笔记 #工作流 #Project/核心', '06_日志/2026-11-26.md');
+  assert.strictEqual(tlTagged.periods['清晨'][0].bodyText, '整理笔记', '日注正文应去掉已提取的标签');
+  assert.deepStrictEqual(tlTagged.periods['清晨'][0].tags, ['#工作流', '#Project/核心']);
   const active = parseDailyActiveStatus(sampleDaily);
   assert.strictEqual(active.counts.aiDoing, 1);
 
@@ -1185,9 +1199,11 @@ async function testBundledPluginAndScrollPreservation() {
   assert.deepStrictEqual(forbiddenModules, [], `移动端兼容插件不应 require Node 内置模块，实际: ${forbiddenModules.join(',')}`);
   assert.strictEqual(typeof CarrotHomePlugin, 'function');
 
+  const { addDaysYMD } = require('../src/utils/date');
   const today = new Date();
   const pad = (n) => String(n).padStart(2, '0');
   const todayYmd = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  const yesterdayYmd = addDaysYMD(todayYmd, -1);
 
   const app = createMockApp({
     '04_Project/P1.md': [
@@ -1237,6 +1253,7 @@ async function testBundledPluginAndScrollPreservation() {
       '## 晚上',
       '- **19:00** 晚上测试条目',
     ].join('\n'),
+    [`06_日志/${yesterdayYmd}.md`]: '## 今日执行\n- TODO 昨日延期任务 10m\n',
     '02_模版/周志-xdb.md': [
       '# 周志 {{title}}',
       'range: {{weekStart}}..{{weekEnd}}',
@@ -1362,9 +1379,44 @@ async function testBundledPluginAndScrollPreservation() {
   await view.store.actions.handleRemoveGanttDependency(gTasksAfter[0], gTasksAfter[1]);
   assertScrollIntact('甘特图断开依赖');
 
-  // 4) 任务工作区筛选（仅人工 / 仅 🤖 AI / 全部 / 清单 / 看板 / 密度 大中小 / 显示已完成）
+  // 4) 任务工作区筛选（默认今日 / 合并默认聚焦与仅今日 / 移除人工/AI筛选并默认全部 / 清单 / 看板 / 密度 大中小 / 显示已完成）
   const tasksSlot = view.contentEl.querySelector('.ch-slot-tasks');
-  for (const lbl of ['仅人工', '仅 🤖 AI', '全部', '清单', '看板', '大', '小', '中']) {
+  assert.strictEqual(view.store.state.execQuickScope, 'today', '任务工作区默认筛选应为 today');
+  assert.strictEqual('execActorFilter' in view.store.state, false, 'store.state 不得保留 execActorFilter');
+  const taskSegLabels = tasksSlot.querySelectorAll('.ch-seg-tab').map((b) => b.textContent);
+  for (const removedLbl of ['全部', '仅人工', '仅 🤖 AI']) {
+    assert.strictEqual(taskSegLabels.includes(removedLbl), false, `任务工作区应移除「${removedLbl}」筛选按钮`);
+  }
+  assert.deepStrictEqual(
+    tasksSlot.querySelectorAll('.ch-pill').map((b) => b.textContent),
+    ['今日 2', '历史延期 1', '全部待办 3', '已完成 0'],
+    '应合并「默认聚焦」与「仅今日」为单个「今日」按钮，且默认选中今日'
+  );
+  const todayScopeBtn = tasksSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith('今日'));
+  assert.ok(todayScopeBtn?.classList.contains('is-active'), '今日按钮应默认高亮');
+  assert.strictEqual(tasksSlot.querySelectorAll('.ch-task-card').length, 2, '默认今日筛选下应仅展示今日 2 项任务');
+  const todayTaskTitles = tasksSlot.querySelectorAll('.ch-task-title').map((el) => el.textContent);
+  assert.ok(todayTaskTitles.some((t) => t.includes('重点')), '默认今日视图应包含人工任务');
+  assert.ok(todayTaskTitles.some((t) => t.includes('AI任务')), '默认今日视图应包含 AI 任务');
+  assert.ok(
+    !todayTaskTitles.some((t) => t.includes('昨日延期任务')),
+    '默认今日筛选下不应混入昨日延期任务'
+  );
+
+  const overdueScopeBtn = tasksSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith('历史延期'));
+  overdueScopeBtn.click();
+  assertScrollIntact('任务工作区[历史延期]');
+  assert.strictEqual(tasksSlot.querySelectorAll('.ch-task-card').length, 1, '切换历史延期后应展示 1 项昨日任务');
+  assert.ok(
+    tasksSlot.querySelector('.ch-task-title')?.textContent.includes('昨日延期任务'),
+    '历史延期视图应展示昨日延期任务'
+  );
+
+  tasksSlot.querySelectorAll('.ch-pill').find((b) => b.textContent.startsWith('今日')).click();
+  assertScrollIntact('任务工作区[今日]');
+  assert.strictEqual(tasksSlot.querySelectorAll('.ch-task-card').length, 2, '切回今日后应仅展示今日 2 项任务');
+
+  for (const lbl of ['清单', '看板', '大', '小', '中']) {
     const btn = tasksSlot.querySelectorAll('.ch-seg-tab').find((b) => b.textContent === lbl);
     assert.ok(btn, `应找到任务工作区按钮 ${lbl}`);
     btn.click();
@@ -1453,8 +1505,12 @@ async function testBundledPluginAndScrollPreservation() {
   const journalStrongs = journalSlot.querySelectorAll('.ch-tl-body strong').map((s) => s.textContent);
   assert.ok(journalStrongs.includes('粗体') && journalStrongs.includes('要事渲染'), '日注主条目应渲染粗体');
   assert.ok(journalSlot.querySelector('.ch-tl-body code')?.textContent === '行内代码', '日注主条目应渲染行内代码');
-  const journalTag = journalSlot.querySelectorAll('.ch-tl-body a.tag').find((a) => a.textContent === '#工作流');
-  assert.ok(journalTag, '日注主条目应渲染 #工作流 标签');
+  assert.strictEqual(journalSlot.querySelectorAll('.ch-tl-body a.tag').length, 0, '日注主条目文本块内不应直接显示标签');
+  const tlTagTexts = journalSlot.querySelectorAll('.ch-tl-tags a.tag').map((a) => a.textContent);
+  assert.ok(tlTagTexts.includes('#工作流'), '日注卡片右下角应展示提取出的 #工作流 标签');
+  assert.ok(tlTagTexts.includes('#Project/核心'), '日注卡片右下角应展示提取出的 #Project/核心 标签');
+  const journalTag = journalSlot.querySelectorAll('.ch-tl-tags a.tag').find((a) => a.textContent === '#工作流');
+  assert.ok(journalTag, '日注右下角应渲染 #工作流 标签');
 
   // 日注时间轴条目徽标头部标记 .has-badge
   const tlHeadRows = journalSlot.querySelectorAll('.ch-tl-head-row');
@@ -1490,6 +1546,30 @@ async function testBundledPluginAndScrollPreservation() {
   assert.strictEqual(childStrong?.textContent, '结论', '日注折叠子记录应渲染粗体');
   assert.strictEqual(childTag?.textContent, '#子块标签', '日注折叠子记录应渲染标签');
 
+  // 时段标题右侧图例说明 & 闪念条目无文本块内「闪念」徽标
+  const periodLeft = journalSlot.querySelector('.ch-tl-period-head .ch-tl-period-left');
+  assert.ok(periodLeft?.querySelector('.ch-tl-period-title')?.textContent.startsWith('## '), '时段头部左侧应包含 ## 时段标题');
+  const legendItems = periodLeft?.querySelectorAll('.ch-tl-legend .ch-tl-legend-item') || [];
+  assert.deepStrictEqual(
+    legendItems.map((el) => el.textContent.trim()),
+    ['日常/完成', '闪念', '要事/疑难', '执行/AI'],
+    '时段标题旁应展示 4 项时间轴圆点图例说明'
+  );
+  const morningNavBtn = journalSlot.querySelectorAll('.ch-period-btn').find((b) => b.textContent.includes('上午'));
+  assert.ok(morningNavBtn, '应找到上午时段按钮');
+  morningNavBtn.click();
+  assertScrollIntact('日注切换时段[上午]');
+  assert.strictEqual(journalSlot.querySelectorAll('.ch-tl-badge').length, 0, '上午全部为闪念条目，文本块内不得再渲染「闪念」徽标');
+  assert.strictEqual(journalSlot.querySelectorAll('.ch-tl-head-row.has-badge').length, 0, '无徽标闪念条目不应标记 .has-badge');
+  const ideaDots = journalSlot.querySelectorAll('.ch-tl-dot.kind-idea');
+  assert.strictEqual(ideaDots.length, 4, '上午 4 条闪念应全部通过 kind-idea 圆点体现类型');
+  assert.ok(ideaDots.every((d) => d.title === '闪念'), 'kind-idea 圆点应带有「闪念」提示');
+  assert.strictEqual(journalSlot.querySelectorAll('.ch-tl-body a.tag').length, 0, '上午日注文本块内不应显示标签');
+  assert.ok(
+    journalSlot.querySelectorAll('.ch-tl-tags a.tag').some((a) => a.textContent === '#闪念标签'),
+    '上午日注右下角应展示提取出的 #闪念标签'
+  );
+
   // C) 任务工作区：标题与折叠子记录原生渲染
   const taskBadgeTops = tasksSlot.querySelectorAll('.ch-task-top.has-badge');
   assert.ok(taskBadgeTops.length >= 1, '含条目徽标的任务卡片头部应标记 .has-badge');
@@ -1506,6 +1586,14 @@ async function testBundledPluginAndScrollPreservation() {
   assert.ok(bundledCss.includes('grid-template-columns: minmax(0, 1fr);'), 'styles.css 窄屏日注条目应使用 minmax(0, 1fr)');
   assert.ok(bundledCss.includes('.ch-root.ch-narrow .ch-tl-time-col::before'), 'styles.css 窄屏下应隐藏时间轴竖线');
   assert.ok(bundledCss.includes('position: static;'), 'styles.css 窄屏下时间圆点应复位为 static');
+  assert.ok(
+    /\.ch-root\.ch-narrow \.ch-tl-dot,\s*\.ch-root\.ch-compact \.ch-tl-dot\s*\{[^}]*order:\s*2;/.test(bundledCss),
+    'styles.css 窄屏下时间轴圆点应排在右侧 (order: 2)'
+  );
+  assert.ok(
+    /\.ch-root\.ch-narrow \.ch-tl-time-btn,\s*\.ch-root\.ch-compact \.ch-tl-time-btn\s*\{[^}]*order:\s*1;/.test(bundledCss),
+    'styles.css 窄屏下时间戳应排在左侧 (order: 1)'
+  );
   assert.strictEqual(bundledCss.includes('grid-template-columns: 62px minmax(0, 1fr);'), false, 'styles.css 不应保留旧的 62px 左侧时间列样式');
   assert.ok(bundledCss.includes('container-name: ch-task-card;'), 'styles.css 应声明 ch-task-card 容器查询');
   assert.ok(bundledCss.includes('@container ch-task-card (max-width: 360px)'), 'styles.css 应包含任务卡片 360px 容器查询');
@@ -1523,6 +1611,12 @@ async function testBundledPluginAndScrollPreservation() {
   assert.strictEqual(bundledCss.includes('grid-template-columns: minmax(0, 1fr) auto;'), false, 'styles.css 不应保留旧的 minmax(0, 1fr) auto 顺序');
   assert.ok(bundledCss.includes('.ch-root.ch-medium .ch-header.no-spiral'), 'styles.css 应包含中屏隐藏螺旋图时的单栏覆盖');
   assert.ok(bundledCss.includes('left: 0;\n  right: auto;'), 'styles.css 螺旋图 AI 悬停卡片应向右展开');
+  assert.ok(bundledCss.includes('.ch-tl-legend'), 'styles.css 应包含日注时间轴图例样式');
+  assert.ok(bundledCss.includes('.ch-tl-legend-dot.kind-idea'), 'styles.css 应包含闪念图例圆点样式');
+  assert.ok(
+    /\.ch-tl-tags\s*\{[^}]*justify-content:\s*flex-end;/.test(bundledCss),
+    'styles.css 应包含日注右下角标签栏样式'
+  );
 
   const execTitle = tasksSlot.querySelector('.ch-task-title');
   assert.ok(execTitle.querySelector('strong')?.textContent === '重点', '任务标题应渲染粗体');

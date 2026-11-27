@@ -7,6 +7,21 @@ const { createMarkdownRenderScope } = require('../utils/markdown-render');
 const { ensureNoteFromTemplate, openFileAtLine } = require('../services/vault-adapter');
 const { renderExpandableChildren } = require('./expandable');
 
+const JOURNAL_DOT_LEGEND = [
+  { kind: 'log', label: '日常/完成' },
+  { kind: 'idea', label: '闪念' },
+  { kind: 'important', label: '要事/疑难' },
+  { kind: 'agent', label: '执行/AI' },
+];
+
+function getTimelineDotTitle(kind) {
+  if (kind === 'idea') return '闪念';
+  if (kind === 'important') return '要事';
+  if (kind === 'question') return '疑难';
+  if (kind === 'agent' || kind === 'review') return '执行/AI';
+  return '日常/完成';
+}
+
 function createJournalCardSection({
   app,
   store,
@@ -107,6 +122,7 @@ function createJournalCardSection({
 
         const timeCol = el('div', 'ch-tl-time-col');
         const dot = el('span', `ch-tl-dot kind-${entry.kind}`);
+        dot.title = getTimelineDotTitle(entry.kind);
         timeCol.appendChild(dot);
 
         const timeBtn = el('button', 'ch-tl-time-btn', entry.timeLabel);
@@ -179,6 +195,24 @@ function createJournalCardSection({
           indentPlainChildren: true,
         });
 
+        if (entry.tags && entry.tags.length > 0) {
+          const tagsEl = el('div', 'ch-tl-tags');
+          for (const tag of entry.tags) {
+            const tagLink = el('a', 'tag ch-tl-tag', tag);
+            tagLink.setAttribute('href', tag);
+            tagLink.title = `搜索标签 ${tag}`;
+            tagLink.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              app?.internalPlugins?.plugins?.['global-search']?.instance?.openGlobalSearch?.(
+                `tag:${tag}`
+              );
+            });
+            tagsEl.appendChild(tagLink);
+          }
+          tlCard.appendChild(tagsEl);
+        }
+
         itemEl.appendChild(tlCard);
         return itemEl;
       }
@@ -235,8 +269,18 @@ function createJournalCardSection({
             panel.appendChild(emptyWrap);
           } else {
             const pHead = el('div', 'ch-tl-period-head');
-            pHead.appendChild(el('span', '', `## ${state.journalPeriod}`));
-            pHead.appendChild(el('span', '', `${entries.length} 条 · 点击打开标题行`));
+            const pLeft = el('div', 'ch-tl-period-left');
+            pLeft.appendChild(el('span', 'ch-tl-period-title', `## ${state.journalPeriod}`));
+            const legend = el('span', 'ch-tl-legend');
+            for (const item of JOURNAL_DOT_LEGEND) {
+              const li = el('span', 'ch-tl-legend-item');
+              li.appendChild(el('span', `ch-tl-legend-dot kind-${item.kind}`));
+              li.appendChild(document.createTextNode(item.label));
+              legend.appendChild(li);
+            }
+            pLeft.appendChild(legend);
+            pHead.appendChild(pLeft);
+            pHead.appendChild(el('span', 'ch-tl-period-meta', `${entries.length} 条 · 点击打开标题行`));
             pHead.addEventListener('click', () => {
               const ln = journal.periodLineNumbers[state.journalPeriod];
               openFileAtLine(app, journal.filePath, ln >= 0 ? ln : undefined);

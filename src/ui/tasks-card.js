@@ -27,7 +27,6 @@ function createTasksCardSection({
   let bodyContainer = null;
   let densButtons = new Map();
   let layButtons = new Map();
-  let actorButtons = new Map();
   let doneCheckbox = null;
   let kwInput = null;
 
@@ -143,9 +142,6 @@ function createTasksCardSection({
     for (const [k, btn] of layButtons.entries()) {
       btn.classList.toggle('is-active', settings.taskLayout === k);
     }
-    for (const [k, btn] of actorButtons.entries()) {
-      btn.classList.toggle('is-active', state.execActorFilter === k);
-    }
     if (doneCheckbox) {
       doneCheckbox.checked = Boolean(settings.showCompletedTasks);
     }
@@ -162,8 +158,6 @@ function createTasksCardSection({
 
     function matchesBaseFilters(t) {
       if (t.bucket === 'cancelled') return false;
-      if (state.execActorFilter === 'human' && t.hasRobot) return false;
-      if (state.execActorFilter === 'ai' && !t.hasRobot) return false;
       if (state.selectedDate && t.date !== state.selectedDate) return false;
       const kw = state.execKeyword.trim().toLowerCase();
       if (kw) {
@@ -173,10 +167,6 @@ function createTasksCardSection({
       return true;
     }
 
-    const isFocusMatch = (t) =>
-      t.date === today
-        ? settings.showCompletedTasks || t.bucket !== 'done'
-        : t.date < today && (t.bucket === 'todo' || t.bucket === 'doing');
     const isTodayMatch = (t) =>
       t.date === today && (settings.showCompletedTasks || t.bucket !== 'done');
     const isOverdueMatch = (t) =>
@@ -188,7 +178,6 @@ function createTasksCardSection({
       const baseList = state.execTasks.filter(matchesBaseFilters);
 
       const counts = {
-        focus: baseList.filter(isFocusMatch).length,
         today: baseList.filter(isTodayMatch).length,
         overdue: baseList.filter(isOverdueMatch).length,
         open: baseList.filter(isOpenMatch).length,
@@ -197,8 +186,7 @@ function createTasksCardSection({
 
       pillsContainer.replaceChildren();
       const scopes = [
-        ['focus', '默认聚焦'],
-        ['today', '仅今日'],
+        ['today', '今日'],
         ['overdue', '历史延期'],
         ['open', '全部待办'],
         ['done', '已完成'],
@@ -223,16 +211,14 @@ function createTasksCardSection({
       let scoped = [];
       if (state.selectedDate) {
         scoped = baseList.filter((t) => settings.showCompletedTasks || state.execQuickScope === 'done' || t.bucket !== 'done');
-      } else if (state.execQuickScope === 'focus') {
-        scoped = baseList.filter(isFocusMatch);
-      } else if (state.execQuickScope === 'today') {
-        scoped = baseList.filter(isTodayMatch);
       } else if (state.execQuickScope === 'overdue') {
         scoped = baseList.filter(isOverdueMatch);
       } else if (state.execQuickScope === 'open') {
         scoped = baseList.filter(isOpenMatch);
       } else if (state.execQuickScope === 'done') {
         scoped = baseList.filter(isDoneMatch);
+      } else {
+        scoped = baseList.filter(isTodayMatch);
       }
 
       activeCountBadge.textContent = `${scoped.length} 项`;
@@ -341,7 +327,6 @@ function createTasksCardSection({
     tasksSlot.replaceChildren();
     densButtons = new Map();
     layButtons = new Map();
-    actorButtons = new Map();
 
     const card = el('div', 'ch-card');
 
@@ -414,20 +399,7 @@ function createTasksCardSection({
       renderTaskBody();
     });
 
-    const actorSeg = el('div', 'ch-seg-tabs');
-    for (const [ak, al] of [['all', '全部'], ['human', '仅人工'], ['ai', '仅 🤖 AI']]) {
-      const b = el('button', `ch-seg-tab ${state.execActorFilter === ak ? 'is-active' : ''}`, al);
-      b.addEventListener('click', () => {
-        state.execActorFilter = ak;
-        syncToolbarControls();
-        renderTaskBody();
-      });
-      actorButtons.set(ak, b);
-      actorSeg.appendChild(b);
-    }
-
     fg.appendChild(kwInput);
-    fg.appendChild(actorSeg);
     filterRow.appendChild(fg);
     card.appendChild(filterRow);
 

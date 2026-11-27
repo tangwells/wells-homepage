@@ -70,6 +70,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   font-size: 11.5px;
   font-weight: 700;
   color: var(--ch-text-muted);
@@ -80,6 +82,52 @@
 
 .ch-tl-period-head:hover {
   color: var(--ch-accent-strong);
+}
+
+.ch-tl-period-left {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.ch-tl-period-title {
+  white-space: nowrap;
+}
+
+.ch-tl-legend {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ch-text-faint);
+}
+
+.ch-tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.ch-tl-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ch-accent);
+  flex-shrink: 0;
+}
+
+.ch-tl-legend-dot.kind-idea { background: var(--ch-warn); }
+.ch-tl-legend-dot.kind-important { background: var(--ch-danger); }
+.ch-tl-legend-dot.kind-agent { background: var(--ch-info); }
+
+.ch-tl-period-meta {
+  white-space: nowrap;
+  margin-left: auto;
 }
 
 .ch-tl-list {
@@ -206,12 +254,14 @@
 .ch-root.ch-compact .ch-tl-dot {
   position: static;
   flex-shrink: 0;
+  order: 2;
 }
 
 .ch-root.ch-narrow .ch-tl-time-btn,
 .ch-root.ch-compact .ch-tl-time-btn {
   text-align: left;
   padding: 1px 4px;
+  order: 1;
 }
 
 .ch-root.ch-narrow .ch-tl-card,
@@ -252,6 +302,37 @@
 .ch-tl-body.is-done {
   text-decoration: line-through;
   color: var(--ch-text-faint);
+}
+
+.ch-tl-tags {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: -2px;
+}
+
+.ch-root a.ch-tl-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-decoration: none;
+  background: var(--ch-surface-subtle);
+  border: 1px solid var(--ch-border);
+  color: var(--ch-text-muted);
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, color 0.14s;
+}
+
+.ch-root a.ch-tl-tag:hover {
+  background: var(--ch-accent-soft);
+  border-color: var(--ch-accent);
+  color: var(--ch-accent-strong);
 }
 
 .ch-tl-badge {
